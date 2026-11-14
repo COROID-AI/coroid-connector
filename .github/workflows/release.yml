@@ -1,0 +1,55 @@
+name: Release
+
+# A release is a tag. This workflow builds it from the tagged commit, attests
+# what it built, publishes it to npm with provenance and creates the GitHub
+# Release. No person uploads a file.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # the GitHub Release
+  id-token: write # npm provenance and trusted publishing, the attestation
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing (no token) needs npm 11.5.1 or newer.
+      - run: npm install --global npm@11
+      - name: The tag is the package's version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          test "${GITHUB_REF_NAME}" = "v${version}"
+      - run: npm ci
+      - run: npm run type-check
+      - run: npm test
+      - run: npm run build
+      - name: Package, bill of materials and checksums
+        run: |
+          npm pack
+          npm sbom --sbom-format cyclonedx > sbom.cdx.json
+          sha256sum coroid-connector-*.tgz dist/coroid-connector.mjs sbom.cdx.json > SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            coroid-connector-*.tgz
+            dist/coroid-connector.mjs
+      - name: Publish to npm
+        # Trusted publishing when no token is set. NPM_TOKEN exists only for a
+        # first publish, before trusted publishing can be configured for the package.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish coroid-connector-*.tgz --provenance --access public
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --verify-tag --title "${GITHUB_REF_NAME}" --generate-notes \
+            coroid-connector-*.tgz dist/coroid-connector.mjs sbom.cdx.json SHA256SUMS

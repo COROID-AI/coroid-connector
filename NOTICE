@@ -1,0 +1,8 @@
+CoRoid connector
+Copyright 2026 CoNeuroid AB
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The coding agents and ACP adapters the connector installs on request
+(`coroid-connector add`) are not part of this product. Each is downloaded from
+its publisher on npm under its own licence.

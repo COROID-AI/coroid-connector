@@ -1,0 +1,8 @@
+{
+  "name": "coroid-connector-claude-adapter",
+  "private": true,
+  "description": "The claude ACP adapter, as the CoRoid connector installs it",
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.106.0"
+  }
+}

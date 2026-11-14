@@ -1,0 +1,46 @@
+{
+  "name": "@coroid/connector",
+  "version": "0.5.1",
+  "description": "The program a person runs on their own machine so that coding agents on it can work for CoRoid (Plan 47)",
+  "license": "Apache-2.0",
+  "author": "CoNeuroid AB",
+  "homepage": "https://github.com/COROID-AI/coroid-connector#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/COROID-AI/coroid-connector.git"
+  },
+  "bugs": {
+    "url": "https://github.com/COROID-AI/coroid-connector/issues"
+  },
+  "type": "module",
+  "bin": {
+    "coroid-connector": "dist/coroid-connector.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "jest --runInBand",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/jest": "30.0.0",
+    "@types/node": "20.19.27",
+    "esbuild": "0.27.2",
+    "jest": "30.5.2",
+    "ts-jest": "29.4.15",
+    "typescript": "5.9.3"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
