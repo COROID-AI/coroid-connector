@@ -103,11 +103,20 @@ CycloneDX bill of materials and `SHA256SUMS`, and is attested by the workflow
 that built it:
 
 ```sh
-npm view @coroid/connector@<version> dist.attestations   # npm's provenance
-gh attestation verify coroid-connector-<version>.tgz --repo COROID-AI/coroid-connector
-```
+# npm's registry signature and provenance
+mkdir check && cd check && npm init -y
+npm install @coroid/connector@<version>
+npm audit signatures
 
-The attestation names the commit and the workflow run that built the file.
+# the attestation: it names the commit and the workflow run that built the file
+gh release download v<version> --repo COROID-AI/coroid-connector
+gh attestation verify coroid-connector-<version>.tgz --repo COROID-AI/coroid-connector \
+  --signer-workflow COROID-AI/coroid-connector/.github/workflows/release.yml
+
+# the file, built yourself from the tag: the same bytes as its line in SHA256SUMS
+git checkout v<version> && npm ci && npm run build
+shasum -a 256 dist/coroid-connector.mjs
+```
 
 ## What the connector does and does not do
 

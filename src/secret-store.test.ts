@@ -24,6 +24,14 @@ import { SignInStore, type SignIn } from './store.js';
  *    without a desktop session) is taken for a store, and every write fails;
  * C8 a sign-in store made without naming a credential store reaches the
  *    machine's own (a test would write to the developer's keychain).
+ *
+ * Found after 0.5.2 was released, written before the fix (0.5.3):
+ * C9 two sign-ins at one CoRoid address, in two state directories (one per
+ *    organization), share one entry: the second overwrites the first's
+ *    tokens, and logging out of one takes the other's;
+ * C10 a sign-in 0.5.2 kept under the address alone is not read after the
+ *    upgrade, so the person must sign in again; or it stays under that entry
+ *    after the next renewal, where another sign-in could take it.
  */
 const scratch = mkdtempSync(join(tmpdir(), 'coroid-connector-secrets-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -67,7 +75,7 @@ describe('a sign-in with a credential store', () => {
     expect(onDisk).not.toContain('SECRET');
     expect(JSON.parse(onDisk)).toEqual({ api: API, clientId: 'client-1', accessTokenExpiresAt: 1_900_000_000_000, tokensIn: 'a test store' });
     expect(statSync(file).mode & 0o777).toBe(0o600);
-    expect([...items.keys()]).toEqual([API]);
+    expect([...items.keys()]).toEqual([`${API} ${file}`]);
     expect(new SignInStore(file, API, () => undefined, store).read()).toEqual(signIn());
     // Another address's file is not this sign-in.
     const said: string[] = [];
@@ -116,6 +124,33 @@ describe('a sign-in with a credential store', () => {
     expect(kept.read()).toEqual(signIn());
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(said.join('\n')).toMatch(/could not be kept in a test store \(the keyring is locked\).*file only you can read/);
+  });
+
+  it('C9: two sign-ins at one address, in two directories, keep their own tokens and leave one another', () => {
+    const { store, items } = fakeStore();
+    const first = new SignInStore(fileFor(), API, () => undefined, store);
+    const second = new SignInStore(fileFor(), API, () => undefined, store);
+    first.write(signIn({ clientId: 'client-coroid', accessToken: 'cmp_at_SECRETfirst' }));
+    second.write(signIn({ clientId: 'client-expo', accessToken: 'cmp_at_SECRETsecond' }));
+    expect(items.size).toBe(2);
+    expect(first.read()).toMatchObject({ clientId: 'client-coroid', accessToken: 'cmp_at_SECRETfirst' });
+    expect(second.read()).toMatchObject({ clientId: 'client-expo', accessToken: 'cmp_at_SECRETsecond' });
+    second.clear();
+    expect(second.read()).toBeNull();
+    expect(first.read()).toMatchObject({ accessToken: 'cmp_at_SECRETfirst' });
+  });
+
+  it('C10: a sign-in 0.5.2 kept under the address alone is read, and moves to its own entry at the next write', () => {
+    const { store, items } = fakeStore();
+    const file = fileFor();
+    // As 0.5.2 left it: the file names the store, the tokens are under the address.
+    writeFileSync(file, JSON.stringify({ api: API, clientId: 'client-1', accessTokenExpiresAt: 1_900_000_000_000, tokensIn: 'a test store' }), { mode: 0o600 });
+    store.write(API, Buffer.from(JSON.stringify({ accessToken: 'cmp_at_SECRETold', refreshToken: 'cmp_rt_SECRETold' })).toString('base64url'));
+    const kept = new SignInStore(file, API, () => undefined, store);
+    expect(kept.read()).toMatchObject({ clientId: 'client-1', accessToken: 'cmp_at_SECRETold', refreshToken: 'cmp_rt_SECRETold' });
+    kept.write(signIn({ accessToken: 'cmp_at_SECRETrenewed' }));
+    expect([...items.keys()]).toEqual([`${API} ${file}`]);
+    expect(kept.read()?.accessToken).toBe('cmp_at_SECRETrenewed');
   });
 
   it('C8: the credential store is the caller’s choice, never a default', () => {
@@ -199,7 +234,8 @@ onMac('the real macOS keychain (CONNECTOR_KEYCHAIN_TEST=1)', () => {
   it('C2, C3, C5: keeps, reads and removes a secret', () => {
     const store = platformSecretStore('darwin');
     if (!store) throw new Error('No keychain');
-    const account = `https://connector-test-${Date.now()}.invalid`;
+    // As a sign-in's entry is named (0.5.3): its address, a space and its file's path, with a quote in it.
+    const account = `https://connector-test-${Date.now()}.invalid /tmp/a "state" dir/connector-test.invalid.json`;
     store.write(account, 'dGVzdC1zZWNyZXQ');
     expect(store.read(account)).toBe('dGVzdC1zZWNyZXQ');
     store.remove(account);

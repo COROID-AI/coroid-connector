@@ -39,6 +39,14 @@ interface KeptElsewhere {
 
 const FILE_ONLY = 'a file only you can read';
 
+/**
+ * The credential store's entry for one sign-in: its CoRoid address and its
+ * file. A machine signs in to one organization per state directory, so two
+ * sign-ins at one address need two entries (0.5.2 named the entry by the
+ * address alone, and the second overwrote the first).
+ */
+const entryFor = (api: string, file: string): string => `${api} ${file}`;
+
 /** The tokens as one value a store keeps: base64url of their JSON, so no character needs quoting anywhere. */
 const sealed = (signIn: SignIn): string =>
   Buffer.from(JSON.stringify({ accessToken: signIn.accessToken, refreshToken: signIn.refreshToken }), 'utf8').toString('base64url');
@@ -122,7 +130,8 @@ export class SignInStore {
       this.unreadable('It is not a sign-in for this CoRoid address');
       return null;
     }
-    const kept = this.secrets?.read(this.api);
+    // A sign-in 0.5.2 kept under the address alone is read there until its next write moves it.
+    const kept = this.secrets?.read(this.entry) ?? this.secrets?.read(this.api);
     const tokens = kept ? unsealed(kept) : null;
     if (!tokens) {
       this.unreadable(`Its tokens are not in ${elsewhere.tokensIn}`);
@@ -140,14 +149,20 @@ export class SignInStore {
   }
 
   clear(): void {
-    this.secrets?.remove(this.api);
+    this.secrets?.remove(this.entry);
     rmSync(this.file, { force: true });
+  }
+
+  private get entry(): string {
+    return entryFor(this.api, this.file);
   }
 
   /** The store's name when it kept the tokens; null when it did not, and the person is told. */
   private keptInStore(signIn: SignIn, secrets: SecretStore): string | null {
     try {
-      secrets.write(this.api, sealed(signIn));
+      secrets.write(this.entry, sealed(signIn));
+      // A 0.5.2 entry under the address alone is this sign-in's, read once; it does not stay for another to take.
+      secrets.remove(this.api);
       return secrets.name;
     } catch (error) {
       this.say(
