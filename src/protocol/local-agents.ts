@@ -302,6 +302,15 @@ export function parseLocalAgentReports(value: unknown): LocalAgentReport[] {
     .filter((agent): agent is LocalAgentReport => agent !== null);
 }
 
+/** Plan 48: how many agents a machine's description may list; more than any connector has. */
+const AGENTS_IN_A_DESCRIPTION_MAX = 32;
+
+/** A report whose id names no agent of this CoRoid: one a newer connector knows. */
+const isAgentThisCoroidDoesNotKnow = (value: unknown): boolean =>
+  isRecord(value) &&
+  typeof value.id === 'string' &&
+  !LOCAL_AGENT_IDS.some(known => known === value.id);
+
 /**
  * Reads what a connector sent about its machine. Anything that is not exactly
  * a description gives null: a connector is a program on someone's machine and
@@ -314,9 +323,12 @@ export function parseConnectorDescription(
   const name = boundedText(value.name, 100);
   const platform = boundedText(value.platform, 30);
   const connectorVersion = boundedText(value.connectorVersion, 30);
-  const agents = value.agents.map(agentReport);
   if (!name || !platform || !connectorVersion) return null;
-  if (agents.length > LOCAL_AGENT_IDS.length) return null;
+  if (value.agents.length > AGENTS_IN_A_DESCRIPTION_MAX) return null;
+  // A newer connector may report an agent this CoRoid does not know (Plan 48): it is left out, and the machine connects.
+  const agents = value.agents
+    .filter(entry => !isAgentThisCoroidDoesNotKnow(entry))
+    .map(agentReport);
   const read = agents.filter(
     (agent): agent is LocalAgentReport => agent !== null
   );

@@ -45,6 +45,10 @@ flowchart LR
 - **Your sign-in to the agent stays yours.** The agent signs in to its
   provider as it does without CoRoid. CoRoid never sees that sign-in, and the
   model usage is on your plan.
+- **Your plan's terms are yours to check.** Whether a provider's terms allow
+  using your plan through another product, and for which work, differs between
+  providers and plans and can change. Read the terms of your plan, and ask the
+  provider when they do not settle it.
 
 ### A turn, step by step
 
