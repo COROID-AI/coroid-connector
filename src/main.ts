@@ -14,6 +14,7 @@ import { probeAgent } from './probe.js';
 import { Session } from './session.js';
 import { signIn } from './sign-in.js';
 import { runTurn } from './turn.js';
+import { platformSecretStore } from './secret-store.js';
 import { SignInStore, storeFileFor, storeFileIn } from './store.js';
 import { VERSION } from './version.js';
 
@@ -109,8 +110,12 @@ async function run(
   options: { file: string; browser: boolean }
 ): Promise<number> {
   const { file } = options;
-  const store = new SignInStore(file, api, reason =>
-    say(`The saved sign-in could not be used (${reason}); signing in again.`)
+  const store = new SignInStore(
+    file,
+    api,
+    reason => say(`The saved sign-in could not be used (${reason}); signing in again.`),
+    platformSecretStore(),
+    say
   );
   const existing = store.read();
   if (!existing) {
@@ -163,7 +168,7 @@ async function run(
 }
 
 async function logout(api: string, file: string): Promise<number> {
-  const store = new SignInStore(file, api);
+  const store = new SignInStore(file, api, () => undefined, platformSecretStore());
   const signedIn = store.read();
   if (!signedIn) {
     say('This machine is not signed in.');
@@ -210,12 +215,14 @@ export async function main(args: string[]): Promise<number> {
     }
     return (await addAgent(agent, { home: homedir(), say })) ? 0 : 1;
   }
-  if (command === 'status') {
-    await describeMachine(name);
-    return 0;
-  }
   const stateDir = option(args, 'state-dir');
   const file = stateDir ? storeFileIn(stateDir, api) : storeFileFor(homedir(), api);
+  if (command === 'status') {
+    await describeMachine(name);
+    const store = new SignInStore(file, api, () => undefined, platformSecretStore());
+    say(store.read() ? `Signed in at ${api}; the tokens are kept in ${store.where()}.` : `Not signed in at ${api}.`);
+    return 0;
+  }
   if (command === 'logout') return logout(api, file);
   if (command === 'run') return run(api, name, { file, browser: !args.includes('--no-browser') });
   say(USAGE);

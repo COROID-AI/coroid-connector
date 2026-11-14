@@ -116,7 +116,11 @@ It does:
 - sign in with OAuth 2.1 and PKCE in your browser, for one scope
   (`connector.turns`) at `https://api.coroid.ai/connector`. The access token
   lasts 15 minutes; the refresh token 30 days and is replaced at every use.
-  Disconnecting the machine in CoRoid revokes them.
+  Disconnecting the machine in CoRoid revokes them. They are kept in the
+  macOS keychain, or the Secret Service of a Linux desktop session; only where
+  there is neither, in a file only you can read. They are handed to those
+  tools on standard input, never on a command line. `coroid-connector status`
+  says where yours are;
 - tell CoRoid, with its first request, the machine's name (its host name, or
   `--name`), the operating system, its own version, and each agent's version,
   state and the models it offers;
@@ -155,7 +159,8 @@ storage depends on the agent:
 | OpenCode | Its session in its own database under `~/.local/share/opencode` |
 
 The connector's own state is in `~/.coroid/connector` (readable only by you):
-the sign-in and the added adapters.
+the sign-in (its tokens in the credential store, where there is one) and the
+added adapters.
 
 ## Security
 
@@ -166,7 +171,9 @@ See [SECURITY.md](./SECURITY.md) to report a vulnerability.
 The connector is developed in CoRoid's main repository, where it is tested
 against CoRoid's own server code, and exported here for every release. Issues
 and pull requests are welcome here; a change that is accepted goes in through
-the main repository and comes back with the next export.
+the main repository and comes back with the next export. Comments that name a
+plan ("Plan 47 Phase 4", "Plan 48a") point to CoRoid's internal design
+records; each says in place what it decided.
 
 ```sh
 npm ci

@@ -75,7 +75,7 @@ async function signedIn(expiresInSeconds: number): Promise<{ store: SignInStore;
     refreshToken: tokens.refresh_token,
     accessTokenExpiresAt: NOW + expiresInSeconds * 1000,
   };
-  const store = new SignInStore(storeFileFor(home, coroid.api), coroid.api);
+  const store = new SignInStore(storeFileFor(home, coroid.api), coroid.api, () => undefined, null);
   store.write(first);
   return { store, first };
 }
@@ -89,7 +89,7 @@ describe('the connector keeps its sign-in', () => {
     expect(statSync(dirname(file)).mode & 0o777).toBe(0o700);
     expect(store.read()).toEqual(first);
 
-    expect(new SignInStore(file, 'https://api.elsewhere.test').read()).toBeNull();
+    expect(new SignInStore(file, 'https://api.elsewhere.test', () => undefined, null).read()).toBeNull();
     expect(storeFileFor(home, 'https://api.elsewhere.test')).not.toBe(file);
     writeFileSync(file, '{"api":"' + coroid.api + '","refreshToken":42}');
     expect(store.read()).toBeNull();
@@ -123,7 +123,7 @@ describe('the connector keeps its sign-in', () => {
     expect(saved.refreshToken).not.toBe(first.refreshToken);
     expect(saved.accessTokenExpiresAt).toBe(NOW + 900_000);
     // What is in the file renews again: a restart loses nothing.
-    const restarted = new Session(new SignInStore(storeFileFor(home, coroid.api), coroid.api), { now: () => NOW });
+    const restarted = new Session(new SignInStore(storeFileFor(home, coroid.api), coroid.api, () => undefined, null), { now: () => NOW });
     expect(await restarted.renew()).toMatch(/^cmp_at_/);
   });
 
