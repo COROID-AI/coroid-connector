@@ -1,4 +1,4 @@
-import { isCallToServer } from './permission.js';
+import { isCallToServer, permissionAnswer } from './permission.js';
 
 /**
  * Plan 47 Phase 4: during a turn an agent may ask before it uses a tool. The
@@ -16,6 +16,14 @@ import { isCallToServer } from './permission.js';
  *    or ends like CoRoid's;
  * R4 a call that says in its fields that it goes to another server is
  *    allowed because its title names CoRoid's.
+ *
+ * Plan 48 (Cursor), written before the code:
+ * R5 a call to CoRoid's server is refused in the form Cursor reports it (the
+ *    server and the tool beside the call as providerIdentifier and toolName;
+ *    titles `<server>: <tool>` and `<server>-<tool>: <tool>`), or one of
+ *    those forms lets through another server or a command;
+ * R6 a request is answered "allow always" (or "reject always"), so the agent
+ *    keeps the answer in its own settings and outside the turn.
  */
 const SERVER = 'coroid_4f9a12bc';
 
@@ -52,5 +60,37 @@ describe('which tool calls a turn allows', () => {
 
   it('R4: believes the call’s own fields over its title', () => {
     expect(isCallToServer(SERVER, { title: `mcp__${SERVER}__send`, rawInput: { server: 'gmail', tool: 'send' } })).toBe(false);
+  });
+
+  it('R5: allows CoRoid’s server in the forms Cursor reports, and nothing that only looks like it', () => {
+    expect(isCallToServer(SERVER, { title: `${SERVER}: read_file`, rawInput: { providerIdentifier: SERVER, toolName: 'read_file', args: {} } })).toBe(true);
+    expect(isCallToServer(SERVER, { title: `${SERVER}-read_file: read_file`, rawInput: undefined })).toBe(true);
+    expect(isCallToServer(SERVER, { title: `${SERVER}: read_file`, rawInput: undefined })).toBe(true);
+    for (const [title, rawInput] of [
+      [`${SERVER}: read_file`, { providerIdentifier: 'gmail', toolName: 'send' }],
+      [`${SERVER}: read_file`, { providerIdentifier: `${SERVER}_notes`, toolName: 'read_file' }],
+      [`${SERVER}-read_file: write_file`, undefined],
+      [`${SERVER}: read_file; rm -rf ~`, undefined],
+      [`${SERVER}_notes: send`, undefined],
+      [`my_${SERVER}: send`, undefined],
+      [`Shell: echo ${SERVER}: read_file`, undefined],
+    ] as const) {
+      expect([title, isCallToServer(SERVER, { title, rawInput })]).toEqual([title, false]);
+    }
+  });
+
+  it('R6: answers once, never always, whichever the agent lists first', () => {
+    const options = [
+      { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
+      { optionId: 'once', name: 'Allow', kind: 'allow_once' },
+      { optionId: 'never', name: 'Always reject', kind: 'reject_always' },
+      { optionId: 'no', name: 'Reject', kind: 'reject_once' },
+    ];
+    expect(permissionAnswer(options, true)).toEqual({ outcome: { outcome: 'selected', optionId: 'once' } });
+    expect(permissionAnswer(options, false)).toEqual({ outcome: { outcome: 'selected', optionId: 'no' } });
+    // An agent that offers only "always" is not answered with it: the request is cancelled.
+    expect(permissionAnswer([options[0]], true)).toEqual({ outcome: { outcome: 'cancelled' } });
+    expect(permissionAnswer([options[2]], false)).toEqual({ outcome: { outcome: 'cancelled' } });
+    expect(permissionAnswer([], true)).toEqual({ outcome: { outcome: 'cancelled' } });
   });
 });

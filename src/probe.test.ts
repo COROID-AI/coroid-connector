@@ -1,9 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentProfile } from './agent-profiles.js';
 import { ADAPTERS } from './agent-install.js';
-import { AGENT_PROFILES } from './agent-profiles.js';
+import { AGENT_PROFILES, agentProfiles } from './agent-profiles.js';
 import { probeAgent } from './probe.js';
 
 /**
@@ -38,6 +38,21 @@ import { probeAgent } from './probe.js';
  *    working, or as offering an empty list;
  * B5 an agent with thousands of models makes the machine's description a
  *    request too large for CoRoid to take, so the machine never connects.
+ *
+ * Plan 48 (Cursor), written before the code:
+ * A10 Cursor's switch lets through a tool of its own: its permissions file
+ *     (`.cursor/cli.json` in the session's directory, where a deny wins)
+ *     must deny its shell, reads, writes and web fetches on every path and
+ *     allow the tools of the session's one server only;
+ * A11 an agent whose ACP answer names no version (Cursor) is never tried,
+ *     though the profile knows how to ask it for one;
+ * A12 an agent that refuses on this machine is started anyway, or reported
+ *     ready;
+ * A13 Cursor is used though its own settings let it run tools without
+ *     asking (an approval mode other than its allowlist, web searches
+ *     accepted automatically, a settings file that cannot be read), so the
+ *     connector never gets to refuse its web fetch, web search and browser;
+ *     or it is refused with its default settings.
  */
 const STAND_IN = join(__dirname, 'test-utils', 'stand-in-agent.mjs');
 const scratch = mkdtempSync(join(tmpdir(), 'coroid-connector-probe-'));
@@ -170,7 +185,7 @@ describe('what the connector finds out about an agent', () => {
   });
 
   it('A7: every profile switches its agent’s own tools off, and names the versions it was tried on', () => {
-    expect(AGENT_PROFILES.map(known => known.id).sort()).toEqual(['claude', 'codex', 'opencode']);
+    expect(AGENT_PROFILES.map(known => known.id).sort()).toEqual(['claude', 'codex', 'cursor', 'opencode']);
     for (const known of AGENT_PROFILES) {
       const switched = known.ownToolsOff('coroid_0123456789ab');
       expect([known.id, Object.keys(switched).length > 0]).toEqual([known.id, true]);
@@ -181,8 +196,57 @@ describe('what the connector finds out about an agent', () => {
     expect(tried.claude.tried('0.106.0')).toBe(true);
     expect(tried.codex.tried('2.6.0')).toBe(true);
     expect(tried.opencode.tried('2.2.7')).toBe(true);
+    // Cursor's CLI updates itself; the profile takes the builds of the month it was tried in (Plan 48).
+    expect(tried.cursor.tried('2026.11.13-eacade1')).toBe(true);
+    expect(tried.cursor.tried('2026.12.01-0a1b2c3')).toBe(false);
     // Claude and Codex are installed at the adapter version that was tried (Plan 48a), not at whatever is newest.
     expect(ADAPTERS.claude.manifest.dependencies).toEqual({ '@agentclientprotocol/claude-agent-acp': '0.106.0' });
     expect(ADAPTERS.codex.manifest.dependencies).toEqual({ '@agentclientprotocol/codex-acp': '2.6.0' });
+  });
+
+  it('A10: Cursor’s permissions file denies its own tools everywhere and allows only the session’s server', () => {
+    const cursor = AGENT_PROFILES.find(known => known.id === 'cursor');
+    const files = cursor?.ownToolsOff('coroid_0123456789ab').files ?? {};
+    expect(Object.keys(files)).toEqual(['.cursor/cli.json']);
+    const { permissions } = JSON.parse(files['.cursor/cli.json']) as { permissions: { allow: string[]; deny: string[] } };
+    expect(permissions.allow).toEqual(['Mcp(coroid_0123456789ab:*)']);
+    for (const denied of ['Shell(*)', 'Read(**)', 'Read(/**)', 'Read(~/**)', 'Write(**)', 'Write(/**)', 'Write(~/**)', 'WebFetch(*)']) {
+      expect(permissions.deny).toContain(denied);
+    }
+    expect(cursor?.command).toEqual(['agent', 'acp']);
+  });
+
+  it('A11: an agent whose ACP answer names no version is asked with the profile’s own command', async () => {
+    const silent = profile('ready', { versionCommand: [process.execPath, '-e', "console.log('2.2.9 (build x)')"] }, '');
+    expect(await probeAgent(silent)).toMatchObject({ version: '2.2.9', tried: true, state: 'ready' });
+    expect(await probeAgent(profile('ready', {}, ''))).toMatchObject({ version: null, tried: false });
+  });
+
+  it('A12: an agent that refuses on this machine is not started, and says why', async () => {
+    rmSync(record, { force: true });
+    const refusing = profile('ready', { refuses: () => 'Its settings run tools without asking' });
+    expect(await probeAgent(refusing)).toEqual({
+      id: 'opencode', version: null, tried: false, state: 'not_working', detail: 'Its settings run tools without asking', models: null,
+    });
+    expect(existsSync(record)).toBe(false);
+  });
+
+  it('A13: Cursor’s own settings decide whether it may be used', () => {
+    const home = mkdtempSync(join(scratch, 'home-'));
+    const refusal = () => agentProfiles(home).find(known => known.id === 'cursor')?.refuses?.() ?? null;
+    const settings = (content: string) => {
+      mkdirSync(join(home, '.cursor'), { recursive: true });
+      writeFileSync(join(home, '.cursor', 'cli-config.json'), content);
+    };
+    // No settings file: Cursor's defaults ask first.
+    expect(refusal()).toBeNull();
+    settings(JSON.stringify({ approvalMode: 'allowlist', autoAcceptWebSearch: false, permissions: { allow: ['Shell(ls)'] } }));
+    expect(refusal()).toBeNull();
+    settings(JSON.stringify({ approvalMode: 'auto-run' }));
+    expect(refusal()).toMatch(/auto-run/);
+    settings(JSON.stringify({ approvalMode: 'allowlist', autoAcceptWebSearch: true }));
+    expect(refusal()).toMatch(/web search/i);
+    settings('{ not json');
+    expect(refusal()).toMatch(/could not be read/);
   });
 });

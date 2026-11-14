@@ -1,15 +1,25 @@
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LocalAgentModels, LocalAgentReport } from './protocol/local-agents.js';
 import { AcpFailure, startAgent } from './acp.js';
 import { modelSetting, reportedModels } from './agent-models.js';
 import type { AgentProfile } from './agent-profiles.js';
+import { writeSwitchFiles } from './switch-files.js';
 
 const AUTH_REQUIRED = -32000;
 const firstLine = (message: string): string => message.split('\n')[0].trim().slice(0, 300);
 const text = (value: unknown): string | null => (typeof value === 'string' && value.length > 0 ? value : null);
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
+/** Plan 48: the version an agent's own command prints (Cursor: `agent --version`), its first word. */
+function versionAsked(command: string[] | undefined): string | null {
+  if (!command) return null;
+  const [executable, ...args] = command;
+  const asked = spawnSync(executable, args, { encoding: 'utf8', timeout: 15_000 });
+  return asked.status === 0 ? text(asked.stdout.trim().split(/\s+/)[0] ?? '') : null;
+}
 
 /**
  * Finds out whether an agent is there and signed in, and which models its
@@ -25,11 +35,14 @@ export async function probeAgent(
   if (!profile.command) {
     return { id: profile.id, version: null, tried: false, state: 'not_working', detail: `Not added: run coroid-connector add ${profile.id}`, models: null };
   }
+  // Plan 48: an agent that may not be used on this machine is not started (Cursor whose settings run tools without asking).
+  const refusal = profile.refuses?.() ?? null;
+  if (refusal) return { id: profile.id, version: null, tried: false, state: 'not_working', detail: refusal, models: null };
   const command = profile.command;
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'coroid-connector-')));
   // The check gives the agent no MCP server; the switch is set as for a turn, so that nothing of the person's loads.
   const switched = profile.ownToolsOff('coroid');
-  for (const [name, content] of Object.entries(switched.files ?? {})) writeFileSync(join(directory, name), content);
+  writeSwitchFiles(directory, switched.files);
   const agent = startAgent(command, { cwd: directory, env: switched.env });
   if (agent.pid !== null) options.started?.(agent.pid);
 
@@ -50,7 +63,7 @@ export async function probeAgent(
       // A first start through npx downloads the adapter.
       options.timeoutMs ?? 120_000
     );
-    version = isRecord(hello.agentInfo) ? text(hello.agentInfo.version) : null;
+    version = (isRecord(hello.agentInfo) ? text(hello.agentInfo.version) : null) ?? versionAsked(profile.versionCommand);
     const session = await agent.request(
       'session/new',
       { cwd: directory, mcpServers: [], ...(switched.sessionMeta ? { _meta: switched.sessionMeta } : {}) },

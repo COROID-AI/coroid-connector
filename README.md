@@ -1,7 +1,7 @@
 # CoRoid connector
 
 The CoRoid connector lets the coding agents on your own machine (Codex,
-Claude Code, OpenCode) do work [CoRoid](https://coroid.ai) assigns to them,
+Claude Code, OpenCode, Cursor) do work [CoRoid](https://coroid.ai) assigns to them,
 on your own subscription. The agent does a role's reasoning on your machine;
 CoRoid gives it that role's tools and keeps the rest of the workflow: the
 task, the checks, the record of what happened.
@@ -86,7 +86,7 @@ npm install --global @coroid/connector           # anywhere with Node 20 or newe
 Then add the agents you use, and start it:
 
 ```sh
-coroid-connector add codex      # or: add claude. OpenCode needs no adding.
+coroid-connector add codex      # or: add claude. OpenCode and Cursor need no adding.
 coroid-connector                # signs in once, in your browser, then stays connected
 ```
 
@@ -138,8 +138,10 @@ It does:
 
 It does not:
 
-- read or send any file of your machine, run a command of its own, or let the
-  agent use its shell, editor, web search, MCP servers or connectors;
+- read or send your files, run a command of its own, or let the agent use its
+  shell, editor, web search, MCP servers or connectors. The only file it reads
+  that is not its own is Cursor's settings (`~/.cursor/cli-config.json`), for
+  the two values that decide whether it may use Cursor; nothing of it is sent;
 - open a port others can reach, or take instructions from anyone but CoRoid
   over the connection it opened;
 - download anything when it runs.
@@ -151,6 +153,7 @@ It does not:
 | Codex | `CODEX_CONFIG`: the shell, unified exec, apps, plugins, multi-agent, image, browser and computer-use features off, web search disabled; session mode `read-only` |
 | Claude Code | Session options: no tools of its own, no MCP configuration but the turn's, none of your settings, no session transcript; mode `default` |
 | OpenCode | An `opencode.jsonc` in the turn's directory that denies every action except the tools of the turn's MCP server |
+| Cursor | A `.cursor/cli.json` in the turn's directory that denies its shell, reads, writes and web fetches on every path and allows the tools of the turn's MCP server; its web fetch, web search and browser ask first and are refused. Used only while Cursor's own settings ask first (its approval mode is `allowlist` and web searches are not accepted automatically); the connector reads those two settings, on the machine only |
 
 A switch belongs to the versions it was tried on: the connector uses only the
 adapter versions its lockfiles pin, and an agent on another version is shown
@@ -166,6 +169,7 @@ storage depends on the agent:
 | Claude Code | No transcript |
 | Codex | A transcript in `~/.codex/sessions`, including the files it read |
 | OpenCode | Its session in its own database under `~/.local/share/opencode` |
+| Cursor | Its session in its own database under `~/.cursor/acp-sessions` |
 
 The connector's own state is in `~/.coroid/connector` (readable only by you):
 the sign-in (its tokens in the credential store, where there is one) and the

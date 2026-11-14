@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -10,7 +10,8 @@ import type {
 import { AcpFailure, startAgent } from './acp.js';
 import { putOnModel } from './agent-models.js';
 import type { AgentProfile } from './agent-profiles.js';
-import { isCallToServer } from './permission.js';
+import { isCallToServer, permissionAnswer } from './permission.js';
+import { writeSwitchFiles } from './switch-files.js';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -56,13 +57,19 @@ export async function runTurn(input: {
     await input.report([{ type: 'failed', reason: `${profile.name} is not added on this machine` }]);
     return 'failed';
   }
+  // Plan 48: an agent that may not be used on this machine is not started, though it was when the machine connected.
+  const refusal = profile.refuses?.() ?? null;
+  if (refusal) {
+    await input.report([{ type: 'failed', reason: refusal }]);
+    return 'failed';
+  }
   const command = profile.command;
   const deadline = Date.now() + turn.timeLimitSeconds * 1000;
   const left = (): number => Math.max(deadline - Date.now(), 1);
   const server = `coroid_${randomBytes(6).toString('hex')}`;
   const switched = profile.ownToolsOff(server);
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'coroid-turn-')));
-  for (const [name, content] of Object.entries(switched.files ?? {})) writeFileSync(join(directory, name), content);
+  writeSwitchFiles(directory, switched.files);
 
   // What the agent has said and not yet been reported: fragments are joined into whole messages.
   const unsent: ConnectorTurnEvent[] = [];
@@ -97,11 +104,7 @@ export async function runTurn(input: {
           title: text(call.title) ?? known?.title ?? null,
           rawInput: call.rawInput ?? known?.rawInput,
         });
-        const options = Array.isArray(params.options) ? params.options.filter(isRecord) : [];
-        const option = options.find(candidate => (text(candidate.kind) ?? '').startsWith(allowed ? 'allow' : 'reject'));
-        return option
-          ? { outcome: { outcome: 'selected', optionId: option.optionId } }
-          : { outcome: { outcome: 'cancelled' } };
+        return permissionAnswer(Array.isArray(params.options) ? params.options : [], allowed);
       },
     },
   });

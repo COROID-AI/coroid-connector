@@ -50,6 +50,12 @@ import { failureReason, runTurn } from './turn.js';
  * U15 a turn that ran out of time is reported as something else, because the
  *     agent's pending request timed out a moment before the deadline (a timer
  *     may fire a millisecond early by the wall clock).
+ *
+ * Plan 48 (Cursor), written before the code:
+ * U16 a switch file in a directory of its own (Cursor's `.cursor/cli.json`)
+ *     is not written, so the agent starts with its own tools;
+ * U17 an agent that refuses on this machine (Cursor whose settings run tools
+ *     without asking) is started for a turn.
  */
 const STAND_IN = join(__dirname, 'test-utils', 'stand-in-agent.mjs');
 const scratch = mkdtempSync(join(tmpdir(), 'coroid-connector-turn-'));
@@ -220,6 +226,27 @@ describe('the connector runs a turn', () => {
     expect(noHttp.events).toEqual([{ type: 'failed', reason: expect.stringMatching(/MCP server over HTTP/) }]);
     expect(coroid.toolRequests).toEqual([]);
     expect(alive(noHttp.pids[0])).toBe(false);
+  });
+
+  it('U16: a switch file in a directory of its own is written before the agent starts', async () => {
+    const nested = await run('ready', {
+      profile: {
+        ownToolsOff: server => ({
+          env: { STAND_IN_RECORD: record, STAND_IN_LOG: log, STAND_IN_SWITCH: `only ${server}` },
+          files: { '.cursor/cli.json': JSON.stringify({ only: server }), 'stand-in.json': JSON.stringify({ only: server }) },
+          sessionMeta: { standIn: { only: server } },
+        }),
+      },
+    });
+    expect(nested.outcome).toBe('ended');
+    expect(nested.pids).toHaveLength(1);
+  });
+
+  it('U17: an agent that refuses on this machine fails the turn and is not started', async () => {
+    const refused = await run('ready', { profile: { refuses: () => 'Cursor runs some tools without asking' } });
+    expect(refused.outcome).toBe('failed');
+    expect(refused.events).toEqual([{ type: 'failed', reason: 'Cursor runs some tools without asking' }]);
+    expect(refused.pids).toEqual([]);
   });
 
   const offering = (...flags: string[]): Partial<AgentProfile> => ({

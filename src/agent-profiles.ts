@@ -1,5 +1,6 @@
 import type { LocalAgentId } from './protocol/local-agents.js';
 import { adapterVersion, installedAdapter, isAddableAgent } from './agent-install.js';
+import { cursorSettingsRefusal } from './cursor-settings.js';
 
 /**
  * How the connector starts one coding agent so that it has CoRoid's tools
@@ -33,6 +34,10 @@ export interface AgentProfile {
   /** The switch in words, for a record of how the agent was run. */
   switchedOffBy: string;
   tried(version: string): boolean;
+  /** Plan 48: how to ask the agent its version when its ACP answer names none (Cursor). */
+  versionCommand?: string[];
+  /** Plan 48: why the agent may not be used on this machine, or null (Cursor's own settings). */
+  refuses?: () => string | null;
 }
 
 // The adapter versions the profiles were tried on are the ones the release's lockfiles install.
@@ -112,15 +117,45 @@ export const AGENT_PROFILES: AgentProfile[] = [
       'session metadata: claudeCode.options = { tools: [], strictMcpConfig: true, settingSources: [], persistSession: false }; session mode default; MCP_TOOL_TIMEOUT 32 minutes',
     tried: version => version === CLAUDE_ADAPTER,
   },
+  {
+    id: 'cursor',
+    name: 'Cursor',
+    // The person's own Cursor CLI, signed in with `agent login`.
+    command: ['agent', 'acp'],
+    // Cursor's project permissions, where a deny wins over an allow: everything of its own is denied on every
+    // path; the session's one server is allowed. Its web fetch, web search and browser ask first, and the
+    // connector refuses them, as long as Cursor's own settings ask (`refuses`, set per machine).
+    ownToolsOff: server => ({
+      files: {
+        '.cursor/cli.json': `${JSON.stringify(
+          {
+            permissions: {
+              allow: [`Mcp(${server}:*)`],
+              deny: ['Shell(*)', 'Read(*)', 'Read(**)', 'Read(/**)', 'Read(~/**)', 'Write(*)', 'Write(**)', 'Write(/**)', 'Write(~/**)', 'WebFetch(*)'],
+            },
+          },
+          null,
+          2
+        )}\n`,
+      },
+    }),
+    switchedOffBy:
+      '.cursor/cli.json in the session’s directory: permissions deny its shell, reads, writes and web fetches on every path and allow the tools of the session’s one MCP server; its web fetch, web search and browser ask first and are refused',
+    // Cursor's CLI updates itself; the builds of the month it was tried in (2026-11-14, 2026.11.13-eacade1).
+    tried: version => /^2026\.11\.\d+-[0-9a-f]+$/.test(version),
+    versionCommand: ['agent', '--version'],
+  },
 ];
 
 /**
  * The profiles as they run on this machine: Codex and Claude Code from the
  * adapters added under the person's home directory, with the Node that runs
- * the connector; OpenCode from the person's own installation.
+ * the connector; OpenCode and Cursor from the person's own installation,
+ * Cursor only while its own settings ask before its tools.
  */
 export function agentProfiles(home: string): AgentProfile[] {
   return AGENT_PROFILES.map(profile => {
+    if (profile.id === 'cursor') return { ...profile, refuses: () => cursorSettingsRefusal(home) };
     if (!isAddableAgent(profile.id)) return profile;
     const entry = installedAdapter(home, profile.id);
     return { ...profile, command: entry ? [process.execPath, entry] : null };

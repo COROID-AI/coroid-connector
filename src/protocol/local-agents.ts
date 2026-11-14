@@ -20,7 +20,12 @@ export const CONNECTOR_LIVENESS_SECONDS = 60;
  * The agents CoRoid has a profile for: how to start each one with only
  * CoRoid's tools (Plan 47 Phase 2). A connector reports no other agent.
  */
-export const LOCAL_AGENT_IDS = ['codex', 'opencode', 'claude'] as const;
+export const LOCAL_AGENT_IDS = [
+  'codex',
+  'opencode',
+  'claude',
+  'cursor',
+] as const;
 export type LocalAgentId = (typeof LOCAL_AGENT_IDS)[number];
 
 /** A known local agent, or null: a name another release wrote is no agent to this one. */
