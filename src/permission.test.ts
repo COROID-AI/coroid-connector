@@ -29,9 +29,28 @@ const SERVER = 'coroid_4f9a12bc';
 
 describe('which tool calls a turn allows', () => {
   it('R1: allows a call to this turn’s server, however the agent reports it', () => {
-    expect(isCallToServer(SERVER, { title: `mcp__${SERVER}__report_qa_verdict`, rawInput: { verdict: 'PASS' } })).toBe(true);
-    expect(isCallToServer(SERVER, { title: `mcp.${SERVER}.read_file`, rawInput: { server: SERVER, tool: 'read_file', arguments: {} } })).toBe(true);
-    expect(isCallToServer(SERVER, { title: null, rawInput: { server: SERVER, tool: 'exec_command', arguments: { command: 'npm test' } } })).toBe(true);
+    expect(
+      isCallToServer(SERVER, {
+        title: `mcp__${SERVER}__report_qa_verdict`,
+        rawInput: { verdict: 'PASS' },
+      })
+    ).toBe(true);
+    expect(
+      isCallToServer(SERVER, {
+        title: `mcp.${SERVER}.read_file`,
+        rawInput: { server: SERVER, tool: 'read_file', arguments: {} },
+      })
+    ).toBe(true);
+    expect(
+      isCallToServer(SERVER, {
+        title: null,
+        rawInput: {
+          server: SERVER,
+          tool: 'exec_command',
+          arguments: { command: 'npm test' },
+        },
+      })
+    ).toBe(true);
   });
 
   it('R2: refuses a tool of the agent’s own that only mentions CoRoid’s', () => {
@@ -43,39 +62,101 @@ describe('which tool calls a turn allows', () => {
       'Write proof.txt',
       '',
     ]) {
-      expect([title, isCallToServer(SERVER, { title, rawInput: { command: title } })]).toEqual([title, false]);
+      expect([
+        title,
+        isCallToServer(SERVER, { title, rawInput: { command: title } }),
+      ]).toEqual([title, false]);
     }
-    expect(isCallToServer(SERVER, { title: null, rawInput: { code: `return tools.${SERVER}.read_file()` } })).toBe(false);
-    expect(isCallToServer(SERVER, { title: null, rawInput: undefined })).toBe(false);
+    expect(
+      isCallToServer(SERVER, {
+        title: null,
+        rawInput: { code: `return tools.${SERVER}.read_file()` },
+      })
+    ).toBe(false);
+    expect(isCallToServer(SERVER, { title: null, rawInput: undefined })).toBe(
+      false
+    );
   });
 
   it('R3: refuses another server whose name begins or ends like this turn’s', () => {
-    for (const other of [`${SERVER}_notes`, `my_${SERVER}`, 'coroid', 'coroid_4f9a12bd']) {
-      expect([other, isCallToServer(SERVER, { title: `mcp__${other}__send`, rawInput: {} })]).toEqual([other, false]);
-      expect([other, isCallToServer(SERVER, { title: null, rawInput: { server: other, tool: 'send' } })]).toEqual([other, false]);
+    for (const other of [
+      `${SERVER}_notes`,
+      `my_${SERVER}`,
+      'coroid',
+      'coroid_4f9a12bd',
+    ]) {
+      expect([
+        other,
+        isCallToServer(SERVER, { title: `mcp__${other}__send`, rawInput: {} }),
+      ]).toEqual([other, false]);
+      expect([
+        other,
+        isCallToServer(SERVER, {
+          title: null,
+          rawInput: { server: other, tool: 'send' },
+        }),
+      ]).toEqual([other, false]);
     }
     // A tool name may hold the separator; the server is what stands before the first one.
-    expect(isCallToServer(SERVER, { title: `mcp__${SERVER}_notes__${SERVER}__send`, rawInput: {} })).toBe(false);
+    expect(
+      isCallToServer(SERVER, {
+        title: `mcp__${SERVER}_notes__${SERVER}__send`,
+        rawInput: {},
+      })
+    ).toBe(false);
   });
 
   it('R4: believes the call’s own fields over its title', () => {
-    expect(isCallToServer(SERVER, { title: `mcp__${SERVER}__send`, rawInput: { server: 'gmail', tool: 'send' } })).toBe(false);
+    expect(
+      isCallToServer(SERVER, {
+        title: `mcp__${SERVER}__send`,
+        rawInput: { server: 'gmail', tool: 'send' },
+      })
+    ).toBe(false);
   });
 
   it('R5: allows CoRoid’s server in the forms Cursor reports, and nothing that only looks like it', () => {
-    expect(isCallToServer(SERVER, { title: `${SERVER}: read_file`, rawInput: { providerIdentifier: SERVER, toolName: 'read_file', args: {} } })).toBe(true);
-    expect(isCallToServer(SERVER, { title: `${SERVER}-read_file: read_file`, rawInput: undefined })).toBe(true);
-    expect(isCallToServer(SERVER, { title: `${SERVER}: read_file`, rawInput: undefined })).toBe(true);
+    expect(
+      isCallToServer(SERVER, {
+        title: `${SERVER}: read_file`,
+        rawInput: {
+          providerIdentifier: SERVER,
+          toolName: 'read_file',
+          args: {},
+        },
+      })
+    ).toBe(true);
+    expect(
+      isCallToServer(SERVER, {
+        title: `${SERVER}-read_file: read_file`,
+        rawInput: undefined,
+      })
+    ).toBe(true);
+    expect(
+      isCallToServer(SERVER, {
+        title: `${SERVER}: read_file`,
+        rawInput: undefined,
+      })
+    ).toBe(true);
     for (const [title, rawInput] of [
-      [`${SERVER}: read_file`, { providerIdentifier: 'gmail', toolName: 'send' }],
-      [`${SERVER}: read_file`, { providerIdentifier: `${SERVER}_notes`, toolName: 'read_file' }],
+      [
+        `${SERVER}: read_file`,
+        { providerIdentifier: 'gmail', toolName: 'send' },
+      ],
+      [
+        `${SERVER}: read_file`,
+        { providerIdentifier: `${SERVER}_notes`, toolName: 'read_file' },
+      ],
       [`${SERVER}-read_file: write_file`, undefined],
       [`${SERVER}: read_file; rm -rf ~`, undefined],
       [`${SERVER}_notes: send`, undefined],
       [`my_${SERVER}: send`, undefined],
       [`Shell: echo ${SERVER}: read_file`, undefined],
     ] as const) {
-      expect([title, isCallToServer(SERVER, { title, rawInput })]).toEqual([title, false]);
+      expect([title, isCallToServer(SERVER, { title, rawInput })]).toEqual([
+        title,
+        false,
+      ]);
     }
   });
 
@@ -86,11 +167,87 @@ describe('which tool calls a turn allows', () => {
       { optionId: 'never', name: 'Always reject', kind: 'reject_always' },
       { optionId: 'no', name: 'Reject', kind: 'reject_once' },
     ];
-    expect(permissionAnswer(options, true)).toEqual({ outcome: { outcome: 'selected', optionId: 'once' } });
-    expect(permissionAnswer(options, false)).toEqual({ outcome: { outcome: 'selected', optionId: 'no' } });
+    expect(permissionAnswer(options, true)).toEqual({
+      outcome: { outcome: 'selected', optionId: 'once' },
+    });
+    expect(permissionAnswer(options, false)).toEqual({
+      outcome: { outcome: 'selected', optionId: 'no' },
+    });
     // An agent that offers only "always" is not answered with it: the request is cancelled.
-    expect(permissionAnswer([options[0]], true)).toEqual({ outcome: { outcome: 'cancelled' } });
-    expect(permissionAnswer([options[2]], false)).toEqual({ outcome: { outcome: 'cancelled' } });
-    expect(permissionAnswer([], true)).toEqual({ outcome: { outcome: 'cancelled' } });
+    expect(permissionAnswer([options[0]], true)).toEqual({
+      outcome: { outcome: 'cancelled' },
+    });
+    expect(permissionAnswer([options[2]], false)).toEqual({
+      outcome: { outcome: 'cancelled' },
+    });
+    expect(permissionAnswer([], true)).toEqual({
+      outcome: { outcome: 'cancelled' },
+    });
+  });
+
+  it('R7: allows CoRoid’s server in the forms Antigravity reports, and refuses spoofed names or titles', () => {
+    expect(
+      isCallToServer(SERVER, {
+        name: `mcp_${SERVER}_read_file`,
+        title: `Run mcp_${SERVER}_read_file`,
+        rawInput: { path: 'a.ts' },
+      })
+    ).toBe(true);
+    expect(
+      isCallToServer(SERVER, {
+        name: `mcp_${SERVER}_report_qa_verdict`,
+        title: null,
+        rawInput: {},
+      })
+    ).toBe(true);
+    expect(
+      isCallToServer(SERVER, {
+        title: `Run mcp_${SERVER}_ping_coroid`,
+        rawInput: {},
+      })
+    ).toBe(true);
+    // Spoofed title when tool name says it is a built-in tool must be refused.
+    expect(
+      isCallToServer(SERVER, {
+        name: 'run_command',
+        title: `Run mcp_${SERVER}_read_file`,
+        rawInput: { CommandLine: 'ls' },
+      })
+    ).toBe(false);
+    expect(
+      isCallToServer(SERVER, {
+        name: 'read_file',
+        title: `mcp__${SERVER}__read_file`,
+        rawInput: { Path: '/etc/passwd' },
+      })
+    ).toBe(false);
+    // Another server or malformed tool name must be refused.
+    expect(
+      isCallToServer(SERVER, {
+        name: `mcp_${SERVER}_notes_send`,
+        title: `Run mcp_${SERVER}_notes_send`,
+        rawInput: {},
+      })
+    ).toBe(true);
+    expect(
+      isCallToServer(SERVER, {
+        name: `mcp_${SERVER}x_read_file`,
+        title: `Run mcp_${SERVER}x_read_file`,
+        rawInput: {},
+      })
+    ).toBe(false);
+    expect(
+      isCallToServer(SERVER, {
+        name: `mcp_other_${SERVER}_read_file`,
+        title: null,
+        rawInput: {},
+      })
+    ).toBe(false);
+    expect(
+      isCallToServer(SERVER, {
+        title: `Run mcp_${SERVER}_read_file; rm -rf ~`,
+        rawInput: {},
+      })
+    ).toBe(false);
   });
 });

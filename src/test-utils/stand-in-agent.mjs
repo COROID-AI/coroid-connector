@@ -156,7 +156,14 @@ async function prompted(id, params) {
   }
   say('The verdict is PASS.');
   await coroidTool('report_qa_verdict', { verdict: 'PASS' });
-  send({ id, result: { stopReason: 'end_turn' } });
+  const usageArg = flag('usage');
+  const usage = usageArg
+    ? (() => {
+        const [inputTokens, outputTokens] = usageArg.split(',').map(Number);
+        return { inputTokens, outputTokens };
+      })()
+    : undefined;
+  send({ id, result: { stopReason: 'end_turn', ...(usage ? { usage } : {}) } });
 }
 
 createInterface({ input: process.stdin }).on('line', line => {
@@ -174,7 +181,7 @@ createInterface({ input: process.stdin }).on('line', line => {
         protocolVersion: 1,
         agentInfo: { name: 'stand-in', version: flag('version') ?? '1.0.0' },
         agentCapabilities: {
-          mcpCapabilities: { http: mode !== 'no-http' },
+          ...(mode === 'omitted-mcp-caps' ? {} : { mcpCapabilities: { http: mode !== 'no-http' } }),
           ...(mode === 'no-system-prompt' ? {} : { sessionCapabilities: { systemPrompt: {} } }),
         },
         authMethods: [{ id: 'stand-in-login', name: 'Sign in' }],

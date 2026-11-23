@@ -3,6 +3,8 @@ import {
   CONNECTOR_SCOPE,
 } from './protocol/local-agents.js';
 
+const OAUTH_TIMEOUT_MS = 30_000;
+
 /**
  * What the connector asks of CoRoid's authorization server (the one that
  * also signs MCP clients in): a client of its own, an approval page, and
@@ -32,8 +34,18 @@ export const connectorResource = (api: string): string =>
 const text = (value: unknown): string | null =>
   typeof value === 'string' && value.length > 0 ? value : null;
 
+function safeParseJson(raw: string): unknown {
+  if (!raw.trimStart().startsWith('{')) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 async function answered(response: Response): Promise<Record<string, unknown>> {
-  const body: unknown = await response.json();
+  const raw = await response.text();
+  const body = safeParseJson(raw);
   const record =
     typeof body === 'object' && body !== null
       ? (body as Record<string, unknown>)
@@ -68,6 +80,7 @@ const tokenRequest = async (
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams(form).toString(),
+        signal: AbortSignal.timeout(OAUTH_TIMEOUT_MS),
       })
     )
   );
@@ -86,6 +99,7 @@ export async function registerClient(
         client_name: clientName,
         redirect_uris: [redirectUri],
       }),
+      signal: AbortSignal.timeout(OAUTH_TIMEOUT_MS),
     })
   );
   const clientId = text(record.client_id);

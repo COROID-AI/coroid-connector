@@ -1,6 +1,15 @@
+import { randomBytes } from 'node:crypto';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { LocalAgentId } from './protocol/local-agents.js';
-import { adapterVersion, installedAdapter, isAddableAgent } from './agent-install.js';
+import {
+  adapterVersion,
+  installedAdapter,
+  isAddableAgent,
+} from './agent-install.js';
 import { cursorSettingsRefusal } from './cursor-settings.js';
+import { resolveBinary } from './resolve-binary.js';
 
 /**
  * How the connector starts one coding agent so that it has CoRoid's tools
@@ -10,12 +19,18 @@ import { cursorSettingsRefusal } from './cursor-settings.js';
  */
 /** What leaves an agent with the tools of one MCP server and nothing of its own. */
 export interface AgentSwitch {
+  /** Extra CLI flags appended to the profile's command for this session. */
+  args?: string[];
   /** Where the switch is the agent's environment. */
   env?: Record<string, string>;
   /** Where it is a file the agent reads from the session's directory. */
   files?: Record<string, string>;
   /** Where it is metadata of the new session. */
   sessionMeta?: Record<string, unknown>;
+  /** Prepares any external per-session switch state before the agent starts. */
+  prepare?(): void;
+  /** Cleans up any external per-session switch state when the agent stops. */
+  cleanup?(): void;
 }
 
 export interface AgentProfile {
@@ -38,11 +53,57 @@ export interface AgentProfile {
   versionCommand?: string[];
   /** Plan 48: why the agent may not be used on this machine, or null (Cursor's own settings). */
   refuses?: () => string | null;
+  /**
+   * True for ACP agents that support HTTP MCP servers in `session/new` even
+   * when `initialize` omits `agentCapabilities.mcpCapabilities`. Explicit
+   * `mcpCapabilities.http === false` is still refused.
+   */
+  assumesHttpMcp?: boolean;
 }
 
 // The adapter versions the profiles were tried on are the ones the release's lockfiles install.
 const CLAUDE_ADAPTER = adapterVersion('claude');
 const CODEX_ADAPTER = adapterVersion('codex');
+
+function antigravitySwitch(home: string): AgentSwitch {
+  const cliDirName = `coroid-${randomBytes(6).toString('hex')}`;
+  const cliDirPath = join(home, '.gemini', 'antigravity-cli', cliDirName);
+  const settings = {
+    agentMode: '',
+    toolPermission: 'strict',
+    allowNonWorkspaceAccess: false,
+    permissions: {
+      deny: [
+        'read_file(*)',
+        'write_file(*)',
+        'command(*)',
+        'read_url(*)',
+        'execute_url(*)',
+        'download_url(*)',
+      ],
+    },
+  };
+  return {
+    args: [
+      '--include-default-customizations=false',
+      '--cli_dir_name',
+      cliDirName,
+    ],
+    prepare: () => {
+      mkdirSync(cliDirPath, { recursive: true, mode: 0o700 });
+      writeFileSync(
+        join(cliDirPath, 'settings.json'),
+        `${JSON.stringify(settings, null, 2)}\n`,
+        {
+          mode: 0o600,
+        }
+      );
+    },
+    cleanup: () => {
+      rmSync(cliDirPath, { recursive: true, force: true });
+    },
+  };
+}
 
 export const AGENT_PROFILES: AgentProfile[] = [
   {
@@ -108,7 +169,12 @@ export const AGENT_PROFILES: AgentProfile[] = [
       sessionMeta: {
         claudeCode: {
           // persistSession false: no transcript of the turn under ~/.claude (Plan 48c).
-          options: { tools: [], strictMcpConfig: true, settingSources: [], persistSession: false },
+          options: {
+            tools: [],
+            strictMcpConfig: true,
+            settingSources: [],
+            persistSession: false,
+          },
         },
       },
     }),
@@ -131,7 +197,18 @@ export const AGENT_PROFILES: AgentProfile[] = [
           {
             permissions: {
               allow: [`Mcp(${server}:*)`],
-              deny: ['Shell(*)', 'Read(*)', 'Read(**)', 'Read(/**)', 'Read(~/**)', 'Write(*)', 'Write(**)', 'Write(/**)', 'Write(~/**)', 'WebFetch(*)'],
+              deny: [
+                'Shell(*)',
+                'Read(*)',
+                'Read(**)',
+                'Read(/**)',
+                'Read(~/**)',
+                'Write(*)',
+                'Write(**)',
+                'Write(/**)',
+                'Write(~/**)',
+                'WebFetch(*)',
+              ],
             },
           },
           null,
@@ -145,20 +222,71 @@ export const AGENT_PROFILES: AgentProfile[] = [
     tried: version => /^2026\.11\.\d+-[0-9a-f]+$/.test(version),
     versionCommand: ['agent', '--version'],
   },
+  {
+    id: 'antigravity',
+    name: 'Antigravity',
+    // Google Antigravity CLI (`agy acp`), signed in on this machine.
+    command: ['agy', 'acp'],
+    ownToolsOff: () => antigravitySwitch(homedir()),
+    mode: 'default',
+    switchedOffBy:
+      'isolated --cli_dir_name settings.json (toolPermission strict, allowNonWorkspaceAccess false, permissions deny read_file, write_file, command, read_url, execute_url, download_url) and --include-default-customizations=false; session mode default',
+    tried: version => /^1\.5\.\d+$/.test(version),
+    assumesHttpMcp: true,
+  },
 ];
 
 /**
  * The profiles as they run on this machine: Codex and Claude Code from the
  * adapters added under the person's home directory, with the Node that runs
- * the connector; OpenCode and Cursor from the person's own installation,
- * Cursor only while its own settings ask before its tools.
+ * the connector; OpenCode, Cursor and Antigravity from the person's own
+ * installation (searching standard install paths when not on PATH).
  */
 export function agentProfiles(home: string): AgentProfile[] {
   return AGENT_PROFILES.map(profile => {
-    if (profile.id === 'cursor') return { ...profile, refuses: () => cursorSettingsRefusal(home) };
+    if (profile.id === 'cursor') {
+      const bin = resolveBinary('agent', {
+        fallbackDirs: [
+          join(home, '.local', 'bin'),
+          '/opt/homebrew/bin',
+          '/usr/local/bin',
+        ],
+      });
+      return {
+        ...profile,
+        command: [bin, 'acp'],
+        versionCommand: [bin, '--version'],
+        refuses: () => cursorSettingsRefusal(home),
+      };
+    }
+    if (profile.id === 'opencode') {
+      const bin = resolveBinary('opencode', {
+        fallbackDirs: [
+          join(home, '.opencode', 'bin'),
+          join(home, '.local', 'bin'),
+          '/opt/homebrew/bin',
+          '/usr/local/bin',
+        ],
+      });
+      return { ...profile, command: [bin, 'acp'] };
+    }
+    if (profile.id === 'antigravity') {
+      const bin = resolveBinary('agy', {
+        fallbackDirs: [
+          join(home, '.gemini', 'bin'),
+          join(home, '.local', 'bin'),
+          '/opt/homebrew/bin',
+          '/usr/local/bin',
+        ],
+      });
+      return {
+        ...profile,
+        command: [bin, 'acp'],
+        ownToolsOff: () => antigravitySwitch(home),
+      };
+    }
     if (!isAddableAgent(profile.id)) return profile;
     const entry = installedAdapter(home, profile.id);
     return { ...profile, command: entry ? [process.execPath, entry] : null };
   });
 }
-

@@ -2,23 +2,38 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { LocalAgentModels, LocalAgentReport } from './protocol/local-agents.js';
+import type {
+  LocalAgentModels,
+  LocalAgentReport,
+} from './protocol/local-agents.js';
 import { AcpFailure, startAgent } from './acp.js';
-import { modelSetting, reportedModels } from './agent-models.js';
+import {
+  modelSetting,
+  reportedModelLabels,
+  reportedModels,
+} from './agent-models.js';
 import type { AgentProfile } from './agent-profiles.js';
 import { writeSwitchFiles } from './switch-files.js';
 
 const AUTH_REQUIRED = -32000;
-const firstLine = (message: string): string => message.split('\n')[0].trim().slice(0, 300);
-const text = (value: unknown): string | null => (typeof value === 'string' && value.length > 0 ? value : null);
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+const firstLine = (message: string): string =>
+  message.split('\n')[0].trim().slice(0, 300);
+const text = (value: unknown): string | null =>
+  typeof value === 'string' && value.length > 0 ? value : null;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
 
 /** Plan 48: the version an agent's own command prints (Cursor: `agent --version`), its first word. */
 function versionAsked(command: string[] | undefined): string | null {
   if (!command) return null;
   const [executable, ...args] = command;
-  const asked = spawnSync(executable, args, { encoding: 'utf8', timeout: 15_000 });
-  return asked.status === 0 ? text(asked.stdout.trim().split(/\s+/)[0] ?? '') : null;
+  const asked = spawnSync(executable, args, {
+    encoding: 'utf8',
+    timeout: 15_000,
+  });
+  return asked.status === 0
+    ? text(asked.stdout.trim().split(/\s+/)[0] ?? '')
+    : null;
 }
 
 /**
@@ -33,22 +48,43 @@ export async function probeAgent(
 ): Promise<LocalAgentReport> {
   // An agent whose adapter is not added is not started: nothing is downloaded to start it.
   if (!profile.command) {
-    return { id: profile.id, version: null, tried: false, state: 'not_working', detail: `Not added: run coroid-connector add ${profile.id}`, models: null };
+    return {
+      id: profile.id,
+      version: null,
+      tried: false,
+      state: 'not_working',
+      detail: `Not added: run coroid-connector add ${profile.id}`,
+      models: null,
+    };
   }
   // Plan 48: an agent that may not be used on this machine is not started (Cursor whose settings run tools without asking).
   const refusal = profile.refuses?.() ?? null;
-  if (refusal) return { id: profile.id, version: null, tried: false, state: 'not_working', detail: refusal, models: null };
-  const command = profile.command;
-  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'coroid-connector-')));
+  if (refusal)
+    return {
+      id: profile.id,
+      version: null,
+      tried: false,
+      state: 'not_working',
+      detail: refusal,
+      models: null,
+    };
+  const directory = realpathSync(
+    mkdtempSync(join(tmpdir(), 'coroid-connector-'))
+  );
   // The check gives the agent no MCP server; the switch is set as for a turn, so that nothing of the person's loads.
   const switched = profile.ownToolsOff('coroid');
+  const command = [...profile.command, ...(switched.args ?? [])];
   writeSwitchFiles(directory, switched.files);
+  switched.prepare?.();
   const agent = startAgent(command, { cwd: directory, env: switched.env });
   if (agent.pid !== null) options.started?.(agent.pid);
 
   let version: string | null = null;
   let models: LocalAgentModels | null = null;
-  const report = (state: LocalAgentReport['state'], detail: string | null): LocalAgentReport => ({
+  const report = (
+    state: LocalAgentReport['state'],
+    detail: string | null
+  ): LocalAgentReport => ({
     id: profile.id,
     version,
     tried: version !== null && profile.tried(version),
@@ -59,25 +95,52 @@ export async function probeAgent(
   try {
     const hello = await agent.request(
       'initialize',
-      { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } },
-      // A first start through npx downloads the adapter.
+      {
+        protocolVersion: 1,
+        clientCapabilities: {
+          fs: { readTextFile: false, writeTextFile: false },
+          terminal: false,
+        },
+      },
       options.timeoutMs ?? 120_000
     );
-    version = (isRecord(hello.agentInfo) ? text(hello.agentInfo.version) : null) ?? versionAsked(profile.versionCommand);
+    version =
+      (isRecord(hello.agentInfo) ? text(hello.agentInfo.version) : null) ??
+      versionAsked(profile.versionCommand);
     const session = await agent.request(
       'session/new',
-      { cwd: directory, mcpServers: [], ...(switched.sessionMeta ? { _meta: switched.sessionMeta } : {}) },
+      {
+        cwd: directory,
+        mcpServers: [],
+        ...(switched.sessionMeta ? { _meta: switched.sessionMeta } : {}),
+      },
       options.timeoutMs ?? 60_000
     );
     const setting = modelSetting(session);
-    models = setting ? { current: setting.current, offered: reportedModels(setting.offered) } : null;
+    if (setting) {
+      const offered = reportedModels(setting.offered);
+      const labels = reportedModelLabels(offered, setting.labels);
+      models = {
+        current: setting.current,
+        offered,
+        ...(labels ? { labels } : {}),
+      };
+    } else {
+      models = null;
+    }
     return report('ready', null);
   } catch (error) {
     if (!(error instanceof AcpFailure)) throw error;
-    const needsSignIn = error.code === AUTH_REQUIRED || /\b(sign|log) ?in\b|authenticat/i.test(error.message);
-    return report(needsSignIn ? 'sign_in_needed' : 'not_working', firstLine(error.message));
+    const needsSignIn =
+      error.code === AUTH_REQUIRED ||
+      /\b(sign|log) ?in\b|authenticat/i.test(error.message);
+    return report(
+      needsSignIn ? 'sign_in_needed' : 'not_working',
+      firstLine(error.message)
+    );
   } finally {
     await agent.stop();
+    switched.cleanup?.();
     rmSync(directory, { recursive: true, force: true });
   }
 }

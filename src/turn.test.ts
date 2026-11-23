@@ -71,12 +71,19 @@ beforeEach(async () => {
 afterEach(() => coroid.close());
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const profile = (mode: string, extra: Partial<AgentProfile> = {}): AgentProfile => ({
+const profile = (
+  mode: string,
+  extra: Partial<AgentProfile> = {}
+): AgentProfile => ({
   id: 'codex',
   name: 'Stand-in',
   command: [process.execPath, STAND_IN, '--mode', mode],
   ownToolsOff: server => ({
-    env: { STAND_IN_RECORD: record, STAND_IN_LOG: log, STAND_IN_SWITCH: `only ${server}` },
+    env: {
+      STAND_IN_RECORD: record,
+      STAND_IN_LOG: log,
+      STAND_IN_SWITCH: `only ${server}`,
+    },
     files: { 'stand-in.json': JSON.stringify({ only: server }) },
     sessionMeta: { standIn: { only: server } },
   }),
@@ -90,25 +97,44 @@ const turn = (extra: Partial<ConnectorTurn> = {}): ConnectorTurn => ({
   agent: 'codex',
   rolePrompt: 'You are the QA agent.',
   message: 'Verify the change and report your verdict.',
-  tools: { url: `${coroid.api}/connector/v1/turns/turn-1/mcp`, token: coroid.turnToken },
+  tools: {
+    url: `${coroid.api}/connector/v1/turns/turn-1/mcp`,
+    token: coroid.turnToken,
+  },
   timeLimitSeconds: 30,
   model: null,
   ...extra,
 });
 const logged = (): Array<Record<string, unknown>> =>
-  readFileSync(log, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
+  readFileSync(log, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map(line => JSON.parse(line) as Record<string, unknown>);
 const alive = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ESRCH') return false;
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'ESRCH'
+    )
+      return false;
     throw error;
   }
 };
 
 /** Runs a turn; CoRoid answers each report with the next scripted directive, then "end" once the agent has stopped. */
-async function run(mode: string, options: { turn?: Partial<ConnectorTurn>; profile?: Partial<AgentProfile>; directives?: ConnectorTurnDirective[] } = {}) {
+async function run(
+  mode: string,
+  options: {
+    turn?: Partial<ConnectorTurn>;
+    profile?: Partial<AgentProfile>;
+    directives?: ConnectorTurnDirective[];
+  } = {}
+) {
   const reports: ConnectorTurnEvent[][] = [];
   const pids: number[] = [];
   const scripted = [...(options.directives ?? [])];
@@ -119,8 +145,13 @@ async function run(mode: string, options: { turn?: Partial<ConnectorTurn>; profi
     started: pid => pids.push(pid),
     report: async events => {
       reports.push(events);
-      const stopped = events.some(event => event.type === 'stopped' || event.type === 'failed');
-      return scripted.shift() ?? (stopped ? { action: 'end' } : { action: 'continue' });
+      const stopped = events.some(
+        event => event.type === 'stopped' || event.type === 'failed'
+      );
+      return (
+        scripted.shift() ??
+        (stopped ? { action: 'end' } : { action: 'continue' })
+      );
     },
   });
   return { outcome, reports, events: reports.flat(), pids };
@@ -146,13 +177,24 @@ describe('the connector runs a turn', () => {
     expect(seen.switchInEnvironment).toBe(`only ${server.name}`);
     expect(seen.meta).toEqual({ standIn: { only: server.name } });
     expect(seen.filesInCwd).toEqual(['stand-in.json']);
-    expect(seen.systemPrompt).toEqual({ mode: 'append', content: [{ type: 'text', text: 'You are the QA agent.' }] });
+    expect(seen.systemPrompt).toEqual({
+      mode: 'append',
+      content: [{ type: 'text', text: 'You are the QA agent.' }],
+    });
 
     const inside = logged();
     expect(inside).toContainEqual({ mode: 'ask' });
-    expect(inside.filter(entry => 'prompt' in entry)).toEqual([{ prompt: 'Verify the change and report your verdict.' }]);
-    expect(inside).toContainEqual({ listed: ['read_file', 'report_qa_verdict'] });
-    expect(coroid.toolRequests.filter(request => request.method === 'tools/call').map(request => [request.name, request.token])).toEqual([
+    expect(inside.filter(entry => 'prompt' in entry)).toEqual([
+      { prompt: 'Verify the change and report your verdict.' },
+    ]);
+    expect(inside).toContainEqual({
+      listed: ['read_file', 'report_qa_verdict'],
+    });
+    expect(
+      coroid.toolRequests
+        .filter(request => request.method === 'tools/call')
+        .map(request => [request.name, request.token])
+    ).toEqual([
       ['read_file', coroid.turnToken],
       ['report_qa_verdict', coroid.turnToken],
     ]);
@@ -174,7 +216,10 @@ describe('the connector runs a turn', () => {
     const seen = JSON.parse(readFileSync(record, 'utf8'));
     expect(seen.systemPrompt).toBeNull();
     expect(logged().filter(entry => 'prompt' in entry)).toEqual([
-      { prompt: 'You are the QA agent.\n\nVerify the change and report your verdict.' },
+      {
+        prompt:
+          'You are the QA agent.\n\nVerify the change and report your verdict.',
+      },
     ]);
   });
 
@@ -182,26 +227,41 @@ describe('the connector runs a turn', () => {
     const { outcome } = await run('asks');
     expect(outcome).toBe('ended');
     const inside = logged();
-    expect(inside.filter(entry => 'called' in entry).map(entry => entry.called)).toEqual(['read_file', 'report_qa_verdict']);
+    expect(
+      inside.filter(entry => 'called' in entry).map(entry => entry.called)
+    ).toEqual(['read_file', 'report_qa_verdict']);
     expect(inside.filter(entry => 'refused' in entry)).toEqual([]);
     expect(inside).toContainEqual({ ownToolAllowed: false });
   });
 
   it('U7: an agent that stops is put what CoRoid says, on the same session, until CoRoid ends the turn', async () => {
     const { outcome, events } = await run('forgets', {
-      directives: [{ action: 'say', text: 'You have not reported a verdict. Call report_qa_verdict now.' }],
+      directives: [
+        {
+          action: 'say',
+          text: 'You have not reported a verdict. Call report_qa_verdict now.',
+        },
+      ],
     });
     expect(outcome).toBe('ended');
     expect(logged().filter(entry => 'prompt' in entry)).toEqual([
       { prompt: 'Verify the change and report your verdict.' },
-      { prompt: 'You have not reported a verdict. Call report_qa_verdict now.' },
+      {
+        prompt: 'You have not reported a verdict. Call report_qa_verdict now.',
+      },
     ]);
     expect(events.filter(event => event.type === 'stopped')).toHaveLength(2);
-    expect(coroid.toolRequests.filter(request => request.method === 'tools/call').map(request => request.name)).toContain('report_qa_verdict');
+    expect(
+      coroid.toolRequests
+        .filter(request => request.method === 'tools/call')
+        .map(request => request.name)
+    ).toContain('report_qa_verdict');
   });
 
   it('U6: when CoRoid ends the turn the agent is told to stop, and stopped', async () => {
-    const { outcome, pids } = await run('slow', { directives: [{ action: 'continue' }, { action: 'end' }] });
+    const { outcome, pids } = await run('slow', {
+      directives: [{ action: 'continue' }, { action: 'end' }],
+    });
     expect(outcome).toBe('ended');
     expect(alive(pids[0])).toBe(false);
     expect(logged()).toContainEqual({ cancelled: true });
@@ -209,21 +269,35 @@ describe('the connector runs a turn', () => {
 
   it('U8: an agent that goes past the time limit is stopped, and CoRoid is told', async () => {
     const started = Date.now();
-    const { outcome, events, pids } = await run('slow', { turn: { timeLimitSeconds: 0.4 } });
+    const { outcome, events, pids } = await run('slow', {
+      turn: { timeLimitSeconds: 0.4 },
+    });
     expect(outcome).toBe('failed');
-    expect(events.at(-1)).toEqual({ type: 'failed', reason: expect.stringMatching(/time limit/) });
+    expect(events.at(-1)).toEqual({
+      type: 'failed',
+      reason: expect.stringMatching(/time limit/),
+    });
     expect(Date.now() - started).toBeLessThan(10_000);
     expect(alive(pids[0])).toBe(false);
   });
 
   it('U9: an agent that cannot start, or cannot reach CoRoid’s tools, fails the turn and not the connector', async () => {
-    const missing = await run('ready', { profile: { command: ['coroid-no-such-agent-binary', 'acp'] } });
+    const missing = await run('ready', {
+      profile: { command: ['coroid-no-such-agent-binary', 'acp'] },
+    });
     expect(missing.outcome).toBe('failed');
-    expect(missing.events).toEqual([{ type: 'failed', reason: expect.stringContaining('coroid-no-such-agent-binary') }]);
+    expect(missing.events).toEqual([
+      {
+        type: 'failed',
+        reason: expect.stringContaining('coroid-no-such-agent-binary'),
+      },
+    ]);
 
     const noHttp = await run('no-http');
     expect(noHttp.outcome).toBe('failed');
-    expect(noHttp.events).toEqual([{ type: 'failed', reason: expect.stringMatching(/MCP server over HTTP/) }]);
+    expect(noHttp.events).toEqual([
+      { type: 'failed', reason: expect.stringMatching(/MCP server over HTTP/) },
+    ]);
     expect(coroid.toolRequests).toEqual([]);
     expect(alive(noHttp.pids[0])).toBe(false);
   });
@@ -232,8 +306,15 @@ describe('the connector runs a turn', () => {
     const nested = await run('ready', {
       profile: {
         ownToolsOff: server => ({
-          env: { STAND_IN_RECORD: record, STAND_IN_LOG: log, STAND_IN_SWITCH: `only ${server}` },
-          files: { '.cursor/cli.json': JSON.stringify({ only: server }), 'stand-in.json': JSON.stringify({ only: server }) },
+          env: {
+            STAND_IN_RECORD: record,
+            STAND_IN_LOG: log,
+            STAND_IN_SWITCH: `only ${server}`,
+          },
+          files: {
+            '.cursor/cli.json': JSON.stringify({ only: server }),
+            'stand-in.json': JSON.stringify({ only: server }),
+          },
           sessionMeta: { standIn: { only: server } },
         }),
       },
@@ -243,16 +324,23 @@ describe('the connector runs a turn', () => {
   });
 
   it('U17: an agent that refuses on this machine fails the turn and is not started', async () => {
-    const refused = await run('ready', { profile: { refuses: () => 'Cursor runs some tools without asking' } });
+    const refused = await run('ready', {
+      profile: { refuses: () => 'Cursor runs some tools without asking' },
+    });
     expect(refused.outcome).toBe('failed');
-    expect(refused.events).toEqual([{ type: 'failed', reason: 'Cursor runs some tools without asking' }]);
+    expect(refused.events).toEqual([
+      { type: 'failed', reason: 'Cursor runs some tools without asking' },
+    ]);
     expect(refused.pids).toEqual([]);
   });
 
   const offering = (...flags: string[]): Partial<AgentProfile> => ({
     command: [process.execPath, STAND_IN, '--mode', 'ready', ...flags],
   });
-  const configured = (): unknown[] => logged().filter(entry => 'configured' in entry).map(entry => entry.configured);
+  const configured = (): unknown[] =>
+    logged()
+      .filter(entry => 'configured' in entry)
+      .map(entry => entry.configured);
 
   it('U11: a turn that names a model puts the agent on it before the first message', async () => {
     const { outcome } = await run('ready', {
@@ -262,70 +350,209 @@ describe('the connector runs a turn', () => {
     expect(outcome).toBe('ended');
     const inside = logged();
     // One change, of the model's setting, while nothing had been asked yet.
-    expect(inside.filter(entry => 'configured' in entry)).toEqual([{ configured: { configId: 'llm', value: 'large' }, prompts: 0 }]);
-    expect(inside.filter(entry => 'promptedOn' in entry)).toEqual([{ promptedOn: 'large' }]);
+    expect(inside.filter(entry => 'configured' in entry)).toEqual([
+      { configured: { configId: 'llm', value: 'large' }, prompts: 0 },
+    ]);
+    expect(inside.filter(entry => 'promptedOn' in entry)).toEqual([
+      { promptedOn: 'large' },
+    ]);
   });
 
   it('U11: a model that comes in a group is one the agent offers, and one it is already on needs no change', async () => {
-    const grouped = await run('ready', { turn: { model: 'b/three' }, profile: offering('--models', 'a/one,a/two,b/three', '--grouped') });
+    const grouped = await run('ready', {
+      turn: { model: 'b/three' },
+      profile: offering('--models', 'a/one,a/two,b/three', '--grouped'),
+    });
     expect(grouped.outcome).toBe('ended');
-    expect(logged().filter(entry => 'promptedOn' in entry)).toEqual([{ promptedOn: 'b/three' }]);
+    expect(logged().filter(entry => 'promptedOn' in entry)).toEqual([
+      { promptedOn: 'b/three' },
+    ]);
 
     rmSync(log, { force: true });
-    const already = await run('ready', { turn: { model: 'large' }, profile: offering('--models', 'small,large', '--current-model', 'large') });
+    const already = await run('ready', {
+      turn: { model: 'large' },
+      profile: offering('--models', 'small,large', '--current-model', 'large'),
+    });
     expect(already.outcome).toBe('ended');
     expect(configured()).toEqual([]);
-    expect(logged().filter(entry => 'promptedOn' in entry)).toEqual([{ promptedOn: 'large' }]);
+    expect(logged().filter(entry => 'promptedOn' in entry)).toEqual([
+      { promptedOn: 'large' },
+    ]);
   });
 
   it('U12: a turn that names no model leaves the agent on the model its owner set', async () => {
-    const { outcome } = await run('ready', { profile: offering('--models', 'small,large', '--current-model', 'large') });
+    const { outcome } = await run('ready', {
+      profile: offering('--models', 'small,large', '--current-model', 'large'),
+    });
     expect(outcome).toBe('ended');
     expect(configured()).toEqual([]);
-    expect(logged().filter(entry => 'promptedOn' in entry)).toEqual([{ promptedOn: 'large' }]);
+    expect(logged().filter(entry => 'promptedOn' in entry)).toEqual([
+      { promptedOn: 'large' },
+    ]);
   });
 
   it('U13: a model the agent does not offer fails the turn before anything is asked of the agent', async () => {
-    const notOffered = await run('ready', { turn: { model: 'huge' }, profile: offering('--models', 'small,large') });
+    const notOffered = await run('ready', {
+      turn: { model: 'huge' },
+      profile: offering('--models', 'small,large'),
+    });
     expect(notOffered.outcome).toBe('failed');
-    expect(notOffered.events).toEqual([{ type: 'failed', reason: 'Stand-in does not offer the model huge on this machine' }]);
-    expect(logged().filter(entry => 'prompt' in entry || 'configured' in entry)).toEqual([]);
+    expect(notOffered.events).toEqual([
+      {
+        type: 'failed',
+        reason: 'Stand-in does not offer the model huge on this machine',
+      },
+    ]);
+    expect(
+      logged().filter(entry => 'prompt' in entry || 'configured' in entry)
+    ).toEqual([]);
     expect(coroid.toolRequests).toEqual([]);
     expect(alive(notOffered.pids[0])).toBe(false);
 
     const noChoice = await run('ready', { turn: { model: 'large' } });
     expect(noChoice.outcome).toBe('failed');
-    expect(noChoice.events).toEqual([{ type: 'failed', reason: 'Stand-in does not offer the model large on this machine' }]);
+    expect(noChoice.events).toEqual([
+      {
+        type: 'failed',
+        reason: 'Stand-in does not offer the model large on this machine',
+      },
+    ]);
     expect(coroid.toolRequests).toEqual([]);
   });
 
   it('U14: an agent that refuses the model, or stays on its own, fails the turn before anything is asked of it', async () => {
     const refuses = await run('refuses-model', {
       turn: { model: 'large' },
-      profile: { command: [process.execPath, STAND_IN, '--mode', 'refuses-model', '--models', 'small,large'] },
+      profile: {
+        command: [
+          process.execPath,
+          STAND_IN,
+          '--mode',
+          'refuses-model',
+          '--models',
+          'small,large',
+        ],
+      },
     });
     expect(refuses.outcome).toBe('failed');
-    expect(refuses.events).toEqual([{ type: 'failed', reason: expect.stringContaining('That model is not available.') }]);
+    expect(refuses.events).toEqual([
+      {
+        type: 'failed',
+        reason: expect.stringContaining('That model is not available.'),
+      },
+    ]);
     expect(logged().filter(entry => 'prompt' in entry)).toEqual([]);
 
     rmSync(log, { force: true });
     const ignores = await run('ignores-model', {
       turn: { model: 'large' },
-      profile: { command: [process.execPath, STAND_IN, '--mode', 'ignores-model', '--models', 'small,large'] },
+      profile: {
+        command: [
+          process.execPath,
+          STAND_IN,
+          '--mode',
+          'ignores-model',
+          '--models',
+          'small,large',
+        ],
+      },
     });
     expect(ignores.outcome).toBe('failed');
-    expect(ignores.events).toEqual([{ type: 'failed', reason: 'Stand-in did not change to the model large' }]);
+    expect(ignores.events).toEqual([
+      { type: 'failed', reason: 'Stand-in did not change to the model large' },
+    ]);
     expect(logged().filter(entry => 'prompt' in entry)).toEqual([]);
     expect(coroid.toolRequests).toEqual([]);
   });
 
   it('U15: a request that times out at the deadline, or a moment before it, is the turn’s time limit', () => {
     const deadline = 1_000_000;
-    const late = new Error('The agent did not answer session/prompt within 0 s');
-    expect(failureReason(late, deadline + 1, deadline)).toBe('The turn’s time limit passed');
-    expect(failureReason(late, deadline - 3, deadline)).toBe('The turn’s time limit passed');
+    const late = new Error(
+      'The agent did not answer session/prompt within 0 s'
+    );
+    expect(failureReason(late, deadline + 1, deadline)).toBe(
+      'The turn’s time limit passed'
+    );
+    expect(failureReason(late, deadline - 3, deadline)).toBe(
+      'The turn’s time limit passed'
+    );
     // Long before it, the agent's own failure is said, in one line.
-    expect(failureReason(new Error('Codex refused\nmore'), deadline - 60_000, deadline)).toBe('Codex refused');
+    expect(
+      failureReason(
+        new Error('Codex refused\nmore'),
+        deadline - 60_000,
+        deadline
+      )
+    ).toBe('Codex refused');
+  });
+
+  it('U18: extracts token usage from session/prompt results and emits usage events and observer callbacks', async () => {
+    const usages: Array<{ inputTokens: number; outputTokens: number }> = [];
+    const tools: Array<{ tool: string; allowed: boolean }> = [];
+    const reports: ConnectorTurnEvent[][] = [];
+    const outcome = await runTurn({
+      turn: turn(),
+      profile: profile('ready', {
+        command: [
+          process.execPath,
+          STAND_IN,
+          '--mode',
+          'ready',
+          '--usage',
+          '1200,340',
+        ],
+      }),
+      reportEveryMs: 50,
+      observer: {
+        onUsage: usage => usages.push(usage),
+        onToolCall: (tool, allowed) => tools.push({ tool, allowed }),
+      },
+      report: async events => {
+        reports.push(events);
+        return events.some(e => e.type === 'stopped')
+          ? { action: 'end' }
+          : { action: 'continue' };
+      },
+    });
+    expect(outcome).toBe('ended');
+    const allEvents = reports.flat();
+    expect(allEvents).toContainEqual({
+      type: 'usage',
+      inputTokens: 1200,
+      outputTokens: 340,
+    });
+    expect(usages).toContainEqual({ inputTokens: 1200, outputTokens: 340 });
+    expect(tools.length).toBeGreaterThan(0);
+  });
+
+  it('U19: assumesHttpMcp allows omitted mcpCapabilities while still rejecting explicit http: false', async () => {
+    const omitted = await run('omitted-mcp-caps', {
+      profile: { assumesHttpMcp: true },
+    });
+    expect(omitted.outcome).toBe('ended');
+    const explicitFalse = await run('no-http', {
+      profile: { assumesHttpMcp: true },
+    });
+    expect(explicitFalse.outcome).toBe('failed');
+    expect(explicitFalse.events).toContainEqual({
+      type: 'failed',
+      reason: 'Stand-in cannot use an MCP server over HTTP',
+    });
+  });
+
+  it('U20: aborting a turn via signal cancels and stops the agent promptly', async () => {
+    const abort = new AbortController();
+    const pids: number[] = [];
+    setTimeout(() => abort.abort(), 150);
+    const outcome = await runTurn({
+      turn: turn({ timeLimitSeconds: 30 }),
+      profile: profile('slow'),
+      reportEveryMs: 50,
+      signal: abort.signal,
+      started: pid => pids.push(pid),
+      report: async () => ({ action: 'continue' }),
+    });
+    expect(outcome).toBe('failed');
+    expect(alive(pids[0])).toBe(false);
   });
 });
-

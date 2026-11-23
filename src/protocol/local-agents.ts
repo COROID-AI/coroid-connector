@@ -25,6 +25,7 @@ export const LOCAL_AGENT_IDS = [
   'opencode',
   'claude',
   'cursor',
+  'antigravity',
 ] as const;
 export type LocalAgentId = (typeof LOCAL_AGENT_IDS)[number];
 
@@ -91,6 +92,11 @@ export interface LocalAgentModels {
   current: string | null;
   /** The models its session offers, by the names the agent takes. */
   offered: string[];
+  /**
+   * Optional human-readable display names reported dynamically by the agent for
+   * offered model IDs (e.g. `fable` -> `Fable 5.2`, `opus` -> `Opus 5.5`).
+   */
+  labels?: Record<string, string>;
 }
 
 /**
@@ -111,6 +117,17 @@ export interface ConnectorDescription {
 }
 
 /**
+ * Optional metadata describing what a turn is working on and who requested it,
+ * displayed in the connector's terminal UI. Never required by the protocol.
+ */
+export interface ConnectorTurnContext {
+  role: string | null;
+  taskTitle: string | null;
+  projectName: string | null;
+  requestedBy: string | null;
+}
+
+/**
  * One role's work for an agent on the machine (Plan 47 Phase 4). The agent
  * reasons there; CoRoid's tools for the role are an MCP server it calls, and
  * nothing of the machine is its to use.
@@ -128,6 +145,8 @@ export interface ConnectorTurn {
   timeLimitSeconds: number;
   /** Phase 5b: the model the agent is to use for this turn; null leaves it at what its owner has set. */
   model: string | null;
+  /** Optional display metadata: role, task title, project, requester. Absent on older servers. */
+  context?: ConnectorTurnContext | null;
 }
 
 /** The answer to a request for work: a turn when one is waiting for this machine. */
@@ -198,7 +217,24 @@ function agentModels(value: unknown): LocalAgentModels | null {
     if (name && !offered.includes(name)) offered.push(name);
     if (offered.length === LOCAL_AGENT_MODELS_MAX) break;
   }
-  return { current: parseLocalAgentModel(value.current), offered };
+  let labels: Record<string, string> | undefined;
+  if (isRecord(value.labels)) {
+    const offeredSet = new Set(offered);
+    const parsedLabels: Record<string, string> = {};
+    for (const [key, rawLabel] of Object.entries(value.labels)) {
+      if (!offeredSet.has(key)) continue;
+      const label = parseLocalAgentModel(rawLabel);
+      if (label && label.toLowerCase() !== key.toLowerCase()) {
+        parsedLabels[key] = label;
+      }
+    }
+    if (Object.keys(parsedLabels).length > 0) labels = parsedLabels;
+  }
+  return {
+    current: parseLocalAgentModel(value.current),
+    offered,
+    ...(labels ? { labels } : {}),
+  };
 }
 
 function agentReport(value: unknown): LocalAgentReport | null {
@@ -214,6 +250,27 @@ function agentReport(value: unknown): LocalAgentReport | null {
     detail: boundedText(value.detail, 300),
     // A malformed list of models is no reason to lose an agent that is ready.
     models: agentModels(value.models),
+  };
+}
+
+/** One-line plain display string without control characters, or null. */
+function plainDisplayText(value: unknown, max: number): string | null {
+  const text = boundedText(value, max);
+  if (!text) return null;
+  const plain = [...text].every(character => {
+    const code = character.charCodeAt(0);
+    return code >= 32 && code !== 127;
+  });
+  return plain ? text : null;
+}
+
+function turnContext(value: unknown): ConnectorTurnContext | null {
+  if (!isRecord(value)) return null;
+  return {
+    role: plainDisplayText(value.role, 60),
+    taskTitle: plainDisplayText(value.taskTitle, 200),
+    projectName: plainDisplayText(value.projectName, 120),
+    requestedBy: plainDisplayText(value.requestedBy, 120),
   };
 }
 
@@ -241,6 +298,7 @@ export function parseConnectorTurn(value: unknown): ConnectorTurn | null {
     tools: { url, token },
     timeLimitSeconds: limit,
     model,
+    context: turnContext(value.context),
   };
 }
 

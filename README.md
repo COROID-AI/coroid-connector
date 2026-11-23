@@ -1,7 +1,7 @@
 # CoRoid connector
 
 The CoRoid connector lets the coding agents on your own machine (Codex,
-Claude Code, OpenCode, Cursor) do work [CoRoid](https://coroid.ai) assigns to them,
+Claude Code, OpenCode, Cursor, Antigravity) do work [CoRoid](https://coroid.ai) assigns to them,
 on your own subscription. The agent does a role's reasoning on your machine;
 CoRoid gives it that role's tools and keeps the rest of the workflow: the
 task, the checks, the record of what happened.
@@ -17,14 +17,14 @@ builds. Nothing here is a copy of anything you cannot read.
 flowchart LR
   subgraph machine["Your machine"]
     C["coroid-connector"]
-    A["Coding agent<br/>Codex · Claude Code · OpenCode"]
+    A["Coding agent<br/>Codex · Claude Code · OpenCode · Cursor · Antigravity"]
     C -- "starts it in an empty temporary directory,<br/>its own tools switched off" --> A
   end
   subgraph coroid["CoRoid · api.coroid.ai"]
     O["Orchestrator"]
     T["The role's tools,<br/>in the task's cloud sandbox"]
   end
-  P[("The agent's provider<br/>OpenAI · Anthropic · OpenRouter")]
+  P[("The agent's provider<br/>OpenAI · Anthropic · Google · Cursor · OpenRouter")]
   C -- "HTTPS, outbound: asks for work,<br/>reports what the agent says" --> O
   A -- "HTTPS, outbound: tool calls,<br/>with a token for this turn only" --> T
   A -- "HTTPS, outbound: model requests,<br/>under your own sign-in" --> P
@@ -90,9 +90,12 @@ npm install --global @coroid/connector           # anywhere with Node 20 or newe
 Then add the agents you use, and start it:
 
 ```sh
-coroid-connector add codex      # or: add claude. OpenCode and Cursor need no adding.
-coroid-connector                # signs in once, in your browser, then stays connected
+coroid-connector add codex      # or: add claude. OpenCode, Cursor, and Antigravity (agy) need no adding.
+coroid-connector                # signs in once, in your browser, then opens the live terminal UI
+coroid-connector doctor         # checks runtime, API reachability, auth, and all coding tools
 ```
+
+While running in an interactive terminal, the connector displays live connection status, detected coding tools, parallel active work slots (up to 4 by default, configurable via `--concurrency 1..8`), token statistics, and a timestamped activity log. Navigate the action bar and Control Menu with arrow keys, `Enter`, `Tab`, and `Esc` (or press `c` check, `v` basic/verbose, `p` pause/resume, `1`–`5` views, `q` quit), or pass `--plain` / `--json` for headless use.
 
 `add` installs the agent's ACP adapter, which brings its own copy of the agent
 (about 350 MB), into `~/.coroid/connector/agents`. It installs exactly the
@@ -158,6 +161,7 @@ It does not:
 | Claude Code | Session options: no tools of its own, no MCP configuration but the turn's, none of your settings, no session transcript; mode `default` |
 | OpenCode | An `opencode.jsonc` in the turn's directory that denies every action except the tools of the turn's MCP server |
 | Cursor | A `.cursor/cli.json` in the turn's directory that denies its shell, reads, writes and web fetches on every path and allows the tools of the turn's MCP server; its web fetch, web search and browser ask first and are refused. Used only while Cursor's own settings ask first (its approval mode is `allowlist` and web searches are not accepted automatically); the connector reads those two settings, on the machine only |
+| Antigravity | Starts `agy acp` with `--include-default-customizations=false` and a temporary isolated `--cli_dir_name` holding a strict `settings.json` (`toolPermission: "strict"`, `allowNonWorkspaceAccess: false`, `permissions.deny` blocking `read_file(*)`, `write_file(*)`, `command(*)`, `read_url(*)`, `execute_url(*)`, `download_url(*)`), session mode `default`; the temporary CLI settings directory is removed when the turn ends |
 
 A switch belongs to the versions it was tried on: the connector uses only the
 adapter versions its lockfiles pin, and an agent on another version is shown
@@ -174,6 +178,7 @@ storage depends on the agent:
 | Codex | A transcript in `~/.codex/sessions`, including the files it read |
 | OpenCode | Its session in its own database under `~/.local/share/opencode` |
 | Cursor | Its session in its own database under `~/.cursor/acp-sessions` |
+| Antigravity | Its session in its own database under `~/.gemini/antigravity-cli` |
 
 The connector's own state is in `~/.coroid/connector` (readable only by you):
 the sign-in (its tokens in the credential store, where there is one) and the

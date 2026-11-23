@@ -1,6 +1,6 @@
 {
   "name": "@coroid/connector",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "The program a person runs on their own machine so that coding agents on it can work for CoRoid (Plan 47)",
   "license": "Apache-2.0",
   "author": "CoNeuroid AB",

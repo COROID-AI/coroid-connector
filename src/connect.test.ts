@@ -42,7 +42,16 @@ const laptop: ConnectorDescription = {
   name: 'Ada’s laptop',
   platform: 'darwin',
   connectorVersion: '0.1.0',
-  agents: [{ id: 'codex', version: '2.6.0', tried: true, state: 'ready', detail: null, models: null }],
+  agents: [
+    {
+      id: 'codex',
+      version: '2.6.0',
+      tried: true,
+      state: 'ready',
+      detail: null,
+      models: null,
+    },
+  ],
 };
 
 let coroid: FakeCoroid;
@@ -52,7 +61,10 @@ beforeEach(async () => {
 afterEach(() => coroid.close());
 
 /** Runs the connector until it has asked `requests` times, then asks it to stop. */
-async function run(requests: number, session: { accessToken(): Promise<string>; renew(): Promise<string> }) {
+async function run(
+  requests: number,
+  session: { accessToken(): Promise<string>; renew(): Promise<string> }
+) {
   const stop = new AbortController();
   const waits: number[] = [];
   const said: string[] = [];
@@ -78,7 +90,10 @@ const aTurn = {
   agent: 'codex',
   rolePrompt: 'You are the QA agent.',
   message: 'Verify the change.',
-  tools: { url: 'https://api.test/connector/v1/turns/turn-7/mcp', token: 'turn-token' },
+  tools: {
+    url: 'https://api.test/connector/v1/turns/turn-7/mcp',
+    token: 'turn-token',
+  },
   timeLimitSeconds: 600,
 };
 const fixedToken = (token = 'cmp_at_fixed') => ({
@@ -89,18 +104,38 @@ const ok = { status: 200, body: { turn: null, pollAfterSeconds: 15 } };
 
 describe('the connector stays connected', () => {
   it('L1, L4, L7: describes the machine once, then asks at CoRoid’s pace until told to stop', async () => {
-    coroid.pollAnswers.push(ok, { status: 200, body: { turn: null, pollAfterSeconds: 40 } }, ok);
+    coroid.pollAnswers.push(
+      ok,
+      { status: 200, body: { turn: null, pollAfterSeconds: 40 } },
+      ok
+    );
     const { ended, waits } = await run(3, fixedToken());
     expect(ended).toBe('stopped');
-    expect(coroid.polls.map(poll => poll.body)).toEqual([{ description: laptop }, {}, {}]);
-    expect(coroid.polls.every(poll => poll.token === 'cmp_at_fixed')).toBe(true);
+    expect(coroid.polls.map(poll => poll.body)).toEqual([
+      { description: laptop },
+      {},
+      {},
+    ]);
+    expect(coroid.polls.every(poll => poll.token === 'cmp_at_fixed')).toBe(
+      true
+    );
     expect(waits).toEqual([15, 40, 15]);
   });
 
   it('L2: describes the machine again when CoRoid asks for it', async () => {
-    coroid.pollAnswers.push(ok, { status: 409, body: { error: 'description_required' } }, ok, ok);
+    coroid.pollAnswers.push(
+      ok,
+      { status: 409, body: { error: 'description_required' } },
+      ok,
+      ok
+    );
     const { waits } = await run(4, fixedToken());
-    expect(coroid.polls.map(poll => poll.body)).toEqual([{ description: laptop }, {}, { description: laptop }, {}]);
+    expect(coroid.polls.map(poll => poll.body)).toEqual([
+      { description: laptop },
+      {},
+      { description: laptop },
+      {},
+    ]);
     // The request that was told to describe itself is repeated at once.
     expect(waits).toEqual([15, 15, 15]);
   });
@@ -118,8 +153,16 @@ describe('the connector stays connected', () => {
     });
     expect(ended).toBe('stopped');
     expect(renewals).toBe(1);
-    expect(coroid.polls.map(poll => poll.token)).toEqual(['cmp_at_old', 'cmp_at_new', 'cmp_at_new']);
-    expect(coroid.polls.map(poll => poll.body)).toEqual([{ description: laptop }, { description: laptop }, {}]);
+    expect(coroid.polls.map(poll => poll.token)).toEqual([
+      'cmp_at_old',
+      'cmp_at_new',
+      'cmp_at_new',
+    ]);
+    expect(coroid.polls.map(poll => poll.body)).toEqual([
+      { description: laptop },
+      { description: laptop },
+      {},
+    ]);
   });
 
   it('L3, L8: ends as signed out when the renewed token is refused too, or the sign-in is over', async () => {
@@ -148,13 +191,25 @@ describe('the connector stays connected', () => {
   });
 
   it('L5: waits longer after each failure of the network or of CoRoid, and goes on when it is back', async () => {
-    coroid.pollAnswers.push('drop', { status: 500 }, { status: 502 }, ok, 'drop', ok);
+    coroid.pollAnswers.push(
+      'drop',
+      { status: 500 },
+      { status: 502 },
+      ok,
+      'drop',
+      ok
+    );
     const { ended, waits } = await run(6, fixedToken());
     expect(ended).toBe('stopped');
     expect(waits).toEqual([5, 10, 20, 15, 5, 15]);
     // What the machine said about itself is sent until CoRoid has taken it.
     expect(coroid.polls.map(poll => poll.body)).toEqual([
-      { description: laptop }, { description: laptop }, { description: laptop }, { description: laptop }, {}, {},
+      { description: laptop },
+      { description: laptop },
+      { description: laptop },
+      { description: laptop },
+      {},
+      {},
     ]);
   });
 
@@ -176,7 +231,12 @@ describe('the connector stays connected', () => {
 
   it('L9: runs a turn CoRoid hands over, once, and asks again at once when it is done', async () => {
     worked.length = 0;
-    coroid.pollAnswers.push(ok, { status: 200, body: { turn: aTurn, pollAfterSeconds: 15 } }, ok, ok);
+    coroid.pollAnswers.push(
+      ok,
+      { status: 200, body: { turn: aTurn, pollAfterSeconds: 15 } },
+      ok,
+      ok
+    );
     const { ended, waits } = await run(4, fixedToken());
     expect(ended).toBe('stopped');
     expect(worked).toEqual(['turn-7']);
@@ -184,10 +244,21 @@ describe('the connector stays connected', () => {
     expect(waits).toEqual([15, 15, 15]);
 
     worked.length = 0;
-    coroid.pollAnswers.push({ status: 200, body: { turn: { ...aTurn, agent: 'some-other-agent' }, pollAfterSeconds: 15 } }, ok);
+    coroid.pollAnswers.push(
+      {
+        status: 200,
+        body: {
+          turn: { ...aTurn, agent: 'some-other-agent' },
+          pollAfterSeconds: 15,
+        },
+      },
+      ok
+    );
     const unreadable = await run(coroid.polls.length + 2, fixedToken());
     expect(worked).toEqual([]);
-    expect(unreadable.said).toContain('CoRoid sent work this connector cannot read. It was left alone.');
+    expect(unreadable.said).toContain(
+      'CoRoid sent work this connector cannot read. It was left alone.'
+    );
   });
 
   it('L10: a report about a turn renews its token once, and brings back what CoRoid says', async () => {
@@ -200,25 +271,51 @@ describe('the connector stays connected', () => {
         return tokens[renewals];
       },
     };
-    coroid.turnAnswers.push({ status: 401 }, { status: 200, body: { action: 'say', text: 'Report your verdict.' } });
-    const directive = await reportTurn(coroid.api, session, 'turn-7', [{ type: 'stopped', reason: 'end_turn' }]);
+    coroid.turnAnswers.push(
+      { status: 401 },
+      { status: 200, body: { action: 'say', text: 'Report your verdict.' } }
+    );
+    const directive = await reportTurn(coroid.api, session, 'turn-7', [
+      { type: 'stopped', reason: 'end_turn' },
+    ]);
     expect(directive).toEqual({ action: 'say', text: 'Report your verdict.' });
-    expect(coroid.turnReports.map(report => [report.turn, report.token])).toEqual([
+    expect(
+      coroid.turnReports.map(report => [report.turn, report.token])
+    ).toEqual([
       ['turn-7', 'cmp_at_old'],
       ['turn-7', 'cmp_at_new'],
     ]);
-    expect(coroid.turnReports[1].events).toEqual([{ type: 'stopped', reason: 'end_turn' }]);
+    expect(coroid.turnReports[1].events).toEqual([
+      { type: 'stopped', reason: 'end_turn' },
+    ]);
 
     // A turn CoRoid has closed, or will not take reports for: the agent's session is to end.
     coroid.turnAnswers.push({ status: 404 });
-    expect(await reportTurn(coroid.api, session, 'turn-7', [])).toEqual({ action: 'end' });
+    expect(await reportTurn(coroid.api, session, 'turn-7', [])).toEqual({
+      action: 'end',
+    });
     coroid.turnAnswers.push({ status: 401 }, { status: 401 });
-    await expect(reportTurn(coroid.api, session, 'turn-7', [])).rejects.toBeInstanceOf(SignedOut);
+    await expect(
+      reportTurn(coroid.api, session, 'turn-7', [])
+    ).rejects.toBeInstanceOf(SignedOut);
   });
 
   it('L6: says once why it is not served, and keeps asking slowly', async () => {
-    const off = { status: 503, body: { error: 'unavailable', error_description: 'Connecting a machine is not enabled' } };
-    const notRolledOut = { status: 403, body: { error: 'forbidden', error_description: 'Connecting a machine is not enabled for this organization' } };
+    const off = {
+      status: 503,
+      body: {
+        error: 'unavailable',
+        error_description: 'Connecting a machine is not enabled',
+      },
+    };
+    const notRolledOut = {
+      status: 403,
+      body: {
+        error: 'forbidden',
+        error_description:
+          'Connecting a machine is not enabled for this organization',
+      },
+    };
     coroid.pollAnswers.push(off, off, notRolledOut, ok, ok);
     const { ended, waits, said } = await run(5, fixedToken());
     expect(ended).toBe('stopped');
@@ -231,7 +328,20 @@ describe('the connector stays connected', () => {
   });
 
   /** A turn CoRoid hands over, by its id. */
-  const turnAnswer = (id: string) => ({ status: 200, body: { turn: { ...aTurn, id, tools: { ...aTurn.tools, url: `https://api.test/connector/v1/turns/${id}/mcp` } }, pollAfterSeconds: 15 } });
+  const turnAnswer = (id: string) => ({
+    status: 200,
+    body: {
+      turn: {
+        ...aTurn,
+        id,
+        tools: {
+          ...aTurn.tools,
+          url: `https://api.test/connector/v1/turns/${id}/mcp`,
+        },
+      },
+      pollAfterSeconds: 15,
+    },
+  });
 
   /** Runs the connector with turns that end only when the test says so. */
   function heldTurns(options: { stopAfterPolls: number; throwing?: string }) {
@@ -246,7 +356,8 @@ describe('the connector stays connected', () => {
       session: fixedToken(),
       describe: async () => laptop,
       work: async turn => {
-        if (turn.id === options.throwing) throw new Error('The agent could not be started');
+        if (turn.id === options.throwing)
+          throw new Error('The agent could not be started');
         running.add(turn.id);
         mostAtOnce = Math.max(mostAtOnce, running.size);
         await new Promise<void>(resolve => release.set(turn.id, resolve));
@@ -260,7 +371,15 @@ describe('the connector stays connected', () => {
         await new Promise(resolve => setTimeout(resolve, 5));
       },
     });
-    return { stop, release, running, finished, said, ended, mostAtOnce: () => mostAtOnce };
+    return {
+      stop,
+      release,
+      running,
+      finished,
+      said,
+      ended,
+      mostAtOnce: () => mostAtOnce,
+    };
   }
   const until = async (check: () => boolean) => {
     for (let waited = 0; !check(); waited += 10) {
@@ -270,7 +389,11 @@ describe('the connector stays connected', () => {
   };
 
   it('L11: a turn handed over while another runs runs beside it', async () => {
-    coroid.pollAnswers.push(turnAnswer('developer'), turnAnswer('explorer'), ok);
+    coroid.pollAnswers.push(
+      turnAnswer('developer'),
+      turnAnswer('explorer'),
+      ok
+    );
     const held = heldTurns({ stopAfterPolls: 3 });
     await until(() => held.running.size === 2);
     expect([...held.running].sort()).toEqual(['developer', 'explorer']);
@@ -281,7 +404,10 @@ describe('the connector stays connected', () => {
   });
 
   it('L12: four at once at most, and it asks for more as soon as one ends', async () => {
-    coroid.pollAnswers.push(...['t1', 't2', 't3', 't4', 't5'].map(turnAnswer), ok);
+    coroid.pollAnswers.push(
+      ...['t1', 't2', 't3', 't4', 't5'].map(turnAnswer),
+      ok
+    );
     const held = heldTurns({ stopAfterPolls: 6 });
     await until(() => held.running.size === 4);
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -313,11 +439,77 @@ describe('the connector stays connected', () => {
   it('L14: a turn that throws is said, and the connector and the other turns go on', async () => {
     coroid.pollAnswers.push(turnAnswer('steady'), turnAnswer('broken'), ok, ok);
     const held = heldTurns({ stopAfterPolls: 4, throwing: 'broken' });
-    await until(() => held.said.some(line => line.includes('The agent could not be started')));
+    await until(() =>
+      held.said.some(line => line.includes('The agent could not be started'))
+    );
     expect(held.running.has('steady')).toBe(true);
     held.release.get('steady')?.();
     expect(await held.ended).toBe('stopped');
     expect(held.finished).toEqual(['steady']);
   });
-});
 
+  it('L15: reportTurn retries transient 5xx failures instead of dropping a long turn', async () => {
+    coroid.turnAnswers.push(
+      { status: 502, body: { error: 'bad_gateway' } },
+      { status: 200, body: { action: 'continue' } }
+    );
+    const directive = await reportTurn(
+      coroid.api,
+      fixedToken(),
+      'turn-retry',
+      [{ type: 'message', text: 'still working' }],
+      {
+        retryDelayMs: 5,
+      }
+    );
+    expect(directive).toEqual({ action: 'continue' });
+    expect(coroid.turnReports).toHaveLength(2);
+  });
+
+  it('L16: stopping while all worker slots are full does not hang the poll loop', async () => {
+    coroid.pollAnswers.push(...['t1', 't2', 't3', 't4'].map(turnAnswer));
+    const held = heldTurns({ stopAfterPolls: 10 });
+    await until(() => held.running.size === 4);
+    held.stop.abort();
+    // Release turns after abort; stayConnected must settle cleanly without extra polls.
+    for (const id of ['t1', 't2', 't3', 't4']) held.release.get(id)?.();
+    expect(await held.ended).toBe('stopped');
+    expect(coroid.polls).toHaveLength(4);
+  });
+
+  it('L17: requesting a recheck forces a fresh machine description on the next poll', async () => {
+    const stop = new AbortController();
+    let describeCalls = 0;
+    let triggerRecheck: (() => void) | null = null;
+    coroid.pollAnswers.push(ok, ok, ok);
+    const ended = await stayConnected({
+      api: coroid.api,
+      session: fixedToken(),
+      describe: async () => {
+        describeCalls += 1;
+        return { ...laptop, name: `Lap-${describeCalls}` };
+      },
+      work: async () => undefined,
+      say: () => undefined,
+      signal: stop.signal,
+      onControl: control => {
+        triggerRecheck = control.requestRecheck;
+      },
+      sleep: async (_seconds, sleepSignal) => {
+        if (coroid.polls.length === 1) {
+          triggerRecheck?.();
+          if (sleepSignal.aborted) return;
+        }
+        if (coroid.polls.length >= 2) stop.abort();
+      },
+    });
+    expect(ended).toBe('stopped');
+    expect(describeCalls).toBe(2);
+    expect(coroid.polls[0].body).toEqual({
+      description: { ...laptop, name: 'Lap-1' },
+    });
+    expect(coroid.polls[1].body).toEqual({
+      description: { ...laptop, name: 'Lap-2' },
+    });
+  });
+});
